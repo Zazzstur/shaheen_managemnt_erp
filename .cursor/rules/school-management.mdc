@@ -1,0 +1,36 @@
+---
+description: Domain and build conventions for the School Management project
+alwaysApply: true
+---
+
+# School Management
+
+Treat this workspace as a school-administration app: students, staff, classes, attendance, grades, and related records. Prefer clear, maintainable code over clever shortcuts.
+
+## Domain
+
+- Model **students**, **teachers/staff**, **classes/sections**, **subjects**, **attendance**, **grades/exams**, and **users/roles**.
+- Use role-based access: admin, teacher, student (and parent only if explicitly added).
+- Never mix identities: a student record is not a login user unless linked by a foreign key.
+- Treat names, IDs, dates, and marks as required data; do not invent dummy PII in production paths.
+
+## Data and safety
+
+- Validate all inputs at the API/form boundary (IDs, dates, marks ranges).
+- Do not expose other students’ records to a student-scoped session.
+- Prefer migrations or explicit schema files over ad-hoc table changes.
+- Keep secrets out of git (`.env`, credentials). Use env vars.
+
+## UI and code
+
+- Keep screens focused: list, detail, create/edit. Reuse shared form and table patterns.
+- Show empty, loading, and error states on every data view.
+- After UI changes, verify the flow in the browser (or the closest substitute if the app is not running).
+- Match existing stack and naming when code exists; do not introduce a second framework.
+
+## Example
+
+```text
+❌ BAD: fetch all students and filter in the client for a teacher’s class
+✅ GOOD: query students by classId the teacher is assigned to, then render
+```

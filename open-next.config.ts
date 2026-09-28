@@ -6,5 +6,5 @@ export default {
     incrementalCache: r2IncrementalCache,
   }),
   // Avoid calling `npm run build` again, which is this OpenNext build.
-  buildCommand: "npx next build",
+  buildCommand: "node scripts/build-next.mjs",
 };

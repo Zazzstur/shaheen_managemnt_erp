@@ -25,5 +25,8 @@
   },
   "observability": {
     "enabled": true
+  },
+  "vars": {
+    "NEXT_PUBLIC_CONVEX_URL": "https://kindhearted-mallard-329.convex.cloud"
   }
 }

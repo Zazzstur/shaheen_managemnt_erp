@@ -66,8 +66,12 @@ export type StudentCsvRow = {
 const HEADER_ALIASES: Record<string, keyof StudentCsvRow | "row"> = {
   admission_number: "admissionNumber",
   admissionnumber: "admissionNumber",
+  admission_no: "admissionNumber",
+  admissionno: "admissionNumber",
   full_name: "fullName",
   fullname: "fullName",
+  student_name: "fullName",
+  studentname: "fullName",
   name: "fullName",
   date_of_birth: "dateOfBirth",
   dateofbirth: "dateOfBirth",
@@ -87,6 +91,8 @@ const HEADER_ALIASES: Record<string, keyof StudentCsvRow | "row"> = {
   section: "section",
   father_name: "fatherName",
   fathername: "fatherName",
+  fathers_name: "fatherName",
+  fathersname: "fatherName",
   parent_name: "fatherName",
   parentname: "fatherName",
   guardian_name: "fatherName",
@@ -94,6 +100,13 @@ const HEADER_ALIASES: Record<string, keyof StudentCsvRow | "row"> = {
   mothername: "motherName",
   father_mobile: "fatherMobile",
   fathermobile: "fatherMobile",
+  father_number: "fatherMobile",
+  fathernumber: "fatherMobile",
+  fathers_number: "fatherMobile",
+  fathersnumber: "fatherMobile",
+  father_phone: "fatherMobile",
+  fathers_mobile: "fatherMobile",
+  fathers_phone: "fatherMobile",
   parent_number: "fatherMobile",
   parentnumber: "fatherMobile",
   parent_phone: "fatherMobile",
@@ -210,6 +223,7 @@ export function parseStudentCsv(text: string): StudentCsvRow[] {
 
   const columns = header.map((cell) => HEADER_ALIASES[normalizeHeader(cell)]);
   const required = [
+    "admissionNumber",
     "fullName",
     "className",
     "fatherName",

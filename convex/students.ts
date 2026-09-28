@@ -612,6 +612,71 @@ async function recordOpeningFees(
   });
 }
 
+function hasCell(value: string | undefined) {
+  const trimmed = (value ?? "").trim().toLowerCase();
+  return (
+    trimmed !== "" &&
+    trimmed !== "-" &&
+    trimmed !== "na" &&
+    trimmed !== "n/a" &&
+    trimmed !== "none" &&
+    trimmed !== "nil"
+  );
+}
+
+function cellOrUndefined(value: string | undefined) {
+  if (value === undefined || !hasCell(value)) {
+    return undefined;
+  }
+  return value.trim();
+}
+
+function matchClassroom(
+  classes: Array<Doc<"classes">>,
+  classNameRaw: string,
+  sectionRaw: string,
+) {
+  const className = classNameRaw.trim().toLowerCase();
+  const section = sectionRaw.trim().toLowerCase();
+  if (!className) {
+    throw new Error("Class is required");
+  }
+  const rows = classes.map((item) => ({
+    item,
+    name: item.name.trim().toLowerCase(),
+    section: item.section.trim().toLowerCase(),
+    label: `${item.name} ${item.section}`
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " "),
+  }));
+  if (section) {
+    const match = rows.find(
+      (item) => item.name === className && item.section === section,
+    );
+    if (!match) {
+      throw new Error(
+        `Class not found: ${classNameRaw.trim()} ${sectionRaw.trim()}`.trim(),
+      );
+    }
+    return match.item;
+  }
+  const byName = rows.filter((item) => item.name === className);
+  if (byName.length === 1) {
+    return byName[0].item;
+  }
+  const byLabel = rows.filter(
+    (item) => item.label === className.replace(/\s+/g, " "),
+  );
+  if (byLabel.length === 1) {
+    return byLabel[0].item;
+  }
+  if (byName.length > 1) {
+    throw new Error("Enter the section for this class");
+  }
+  throw new Error(`Class not found: ${classNameRaw.trim()}`);
+}
+
 export const enrollMany = mutation({
   args: {
     asOf: v.string(),
@@ -645,43 +710,29 @@ export const enrollMany = mutation({
     for (const student of args.students) {
       const admissionNumber = student.admissionNumber.trim();
       try {
-        const gender = student.gender.trim()
+        if (!admissionNumber) {
+          throw new Error("Admission number is required");
+        }
+        const gender = hasCell(student.gender)
           ? parseGender(student.gender)
           : undefined;
-        if (student.gender.trim() && !gender) {
+        if (hasCell(student.gender) && !gender) {
           throw new Error("Gender must be female, male, or other");
         }
-        const className = student.className.trim().toLowerCase();
-        const section = student.section.trim().toLowerCase();
-        if (!className) {
-          throw new Error("Class is required");
-        }
-        const classMatches = classes.filter(
-          (item) => item.name.trim().toLowerCase() === className,
+        const classroom = matchClassroom(
+          classes,
+          student.className,
+          student.section,
         );
-        const classroom = section
-          ? classMatches.find(
-              (item) => item.section.trim().toLowerCase() === section,
-            )
-          : classMatches.length === 1
-            ? classMatches[0]
-            : undefined;
-        if (!classroom) {
-          throw new Error(
-            classMatches.length > 1 && !section
-              ? "Enter the section for this class"
-              : `Class not found: ${student.className.trim()} ${student.section.trim()}`.trim(),
-          );
-        }
         if (admissionNumber && seenAdmissionNumbers.has(admissionNumber)) {
           throw new Error("Admission number is repeated in this file");
         }
         const discount = readDiscount(student);
         const amountPaid = parseDiscountCell(student.amountPaid, "Amount paid");
-        const admissionDate = student.admissionDate?.trim()
-          ? parseDateOfBirth(student.admissionDate)
+        const admissionDate = hasCell(student.admissionDate)
+          ? parseDateOfBirth(student.admissionDate ?? "")
           : undefined;
-        if (student.admissionDate?.trim() && !admissionDate) {
+        if (hasCell(student.admissionDate) && !admissionDate) {
           throw new Error("Admission date must be YYYY-MM-DD or DD-MM-YYYY");
         }
         if (amountPaid > 0 && !admissionDate) {
@@ -689,24 +740,27 @@ export const enrollMany = mutation({
             "Admission date is required when an amount paid is entered",
           );
         }
-        const socialCategory = student.socialCategory.trim()
+        const socialCategory = hasCell(student.socialCategory)
           ? parseSocialCategory(student.socialCategory)
           : undefined;
-        if (student.socialCategory.trim() && !socialCategory) {
+        if (hasCell(student.socialCategory) && !socialCategory) {
           throw new Error("Social category must be general, obc, sc, or st");
         }
-        const previousSchoolAffiliation = student.previousSchoolAffiliation.trim()
+        const previousSchoolAffiliation = hasCell(student.previousSchoolAffiliation)
           ? parseSchoolAffiliation(student.previousSchoolAffiliation)
           : undefined;
-        if (student.previousSchoolAffiliation.trim() && !previousSchoolAffiliation) {
+        if (
+          hasCell(student.previousSchoolAffiliation) &&
+          !previousSchoolAffiliation
+        ) {
           throw new Error(
             "Previous school affiliation must be state, cbse, icse, or other",
           );
         }
-        const transportRequired = student.transportRequired.trim()
+        const transportRequired = hasCell(student.transportRequired)
           ? parseTransportRequired(student.transportRequired)
           : undefined;
-        if (student.transportRequired.trim() && transportRequired === null) {
+        if (hasCell(student.transportRequired) && transportRequired === null) {
           throw new Error("Transport required must be yes or no");
         }
         const previousSchoolOther = student.previousSchoolOther?.trim() ?? "";
@@ -716,30 +770,30 @@ export const enrollMany = mutation({
         const studentId = await insertEnrolledStudent(ctx, {
           admissionNumber,
           fullName: student.fullName,
-          dateOfBirth: student.dateOfBirth,
+          dateOfBirth: cellOrUndefined(student.dateOfBirth),
           gender: gender ?? undefined,
           classId: classroom._id,
           guardianName: student.fatherName,
           guardianPhone: student.fatherMobile,
-          aadhaarNumber: student.aadhaarNumber,
-          placeOfBirth: student.placeOfBirth,
-          religion: student.religion,
-          caste: student.caste,
-          motherTongue: student.motherTongue,
+          aadhaarNumber: cellOrUndefined(student.aadhaarNumber),
+          placeOfBirth: cellOrUndefined(student.placeOfBirth),
+          religion: cellOrUndefined(student.religion),
+          caste: cellOrUndefined(student.caste),
+          motherTongue: cellOrUndefined(student.motherTongue),
           socialCategory: socialCategory ?? undefined,
-          motherName: student.motherName,
-          fatherAadhaarNumber: student.fatherAadhaarNumber,
-          motherAadhaarNumber: student.motherAadhaarNumber,
-          motherPhone: student.motherMobile,
-          email: student.email,
-          residentialAddress: student.residentialAddress,
+          motherName: cellOrUndefined(student.motherName),
+          fatherAadhaarNumber: cellOrUndefined(student.fatherAadhaarNumber),
+          motherAadhaarNumber: cellOrUndefined(student.motherAadhaarNumber),
+          motherPhone: cellOrUndefined(student.motherMobile),
+          email: cellOrUndefined(student.email),
+          residentialAddress: cellOrUndefined(student.residentialAddress),
           transportRequired: transportRequired ?? undefined,
           previousSchoolAffiliation: previousSchoolAffiliation ?? undefined,
           previousSchoolOther:
             previousSchoolAffiliation === "other"
               ? previousSchoolOther
               : undefined,
-          previousSchoolName: student.previousSchoolName,
+          previousSchoolName: cellOrUndefined(student.previousSchoolName),
           discountType: discount.discountType,
           discountValue: discount.discountValue,
           discountReason: discount.discountReason,

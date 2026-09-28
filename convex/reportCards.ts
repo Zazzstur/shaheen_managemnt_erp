@@ -327,12 +327,48 @@ const reportCategoryValidator = v.union(
   v.literal("annual"),
 );
 
+// Exams saved before the rename are still titled "Class test 1/2".
 const categoryMeta = {
-  class_test_1: { title: "Class test 1", maxMarks: 20, composite: false },
-  half_yearly: { title: "Half yearly", maxMarks: 80, composite: true },
-  class_test_2: { title: "Class test 2", maxMarks: 20, composite: false },
-  annual: { title: "Annual", maxMarks: 80, composite: true },
+  class_test_1: {
+    title: "Periodic test 1",
+    legacyTitles: ["Class test 1"],
+    maxMarks: 20,
+    composite: false,
+  },
+  half_yearly: {
+    title: "Half yearly",
+    legacyTitles: [],
+    maxMarks: 80,
+    composite: true,
+  },
+  class_test_2: {
+    title: "Periodic test 2",
+    legacyTitles: ["Class test 2"],
+    maxMarks: 20,
+    composite: false,
+  },
+  annual: { title: "Annual", legacyTitles: [], maxMarks: 80, composite: true },
 } as const;
+
+type CategoryMeta = (typeof categoryMeta)[keyof typeof categoryMeta];
+
+function matchesCategory(examTitle: string, meta: CategoryMeta) {
+  const normalized = examTitle.trim().toLowerCase();
+  if (normalized === meta.title.toLowerCase()) {
+    return true;
+  }
+  return meta.legacyTitles.some((title) => normalized === title.toLowerCase());
+}
+
+function pickCategoryExam<T extends { title: string }>(
+  exams: T[],
+  meta: CategoryMeta,
+): T | undefined {
+  const current = exams.find(
+    (exam) => exam.title.trim().toLowerCase() === meta.title.toLowerCase(),
+  );
+  return current ?? exams.find((exam) => matchesCategory(exam.title, meta));
+}
 
 const partValidator = v.union(
   v.object({
@@ -371,18 +407,16 @@ export const categorySheet = query({
       .query("exams")
       .withIndex("by_class", (q) => q.eq("classId", args.classId))
       .take(80);
-    const byTitle = new Map(
-      exams
-        .filter((exam) => exam.subjectId === args.subjectId)
-        .map((exam) => [exam.title.trim().toLowerCase(), exam]),
+    const subjectExams = exams.filter(
+      (exam) => exam.subjectId === args.subjectId,
     );
     const students = await ctx.db
       .query("students")
       .withIndex("by_class", (q) => q.eq("classId", args.classId))
       .take(80);
 
-    async function readPart(title: string) {
-      const exam = byTitle.get(title.toLowerCase());
+    async function readPart(meta: CategoryMeta) {
+      const exam = pickCategoryExam(subjectExams, meta);
       if (!exam) {
         return null;
       }
@@ -393,10 +427,10 @@ export const categorySheet = query({
       return new Map(rows.map((row) => [row.studentId, row]));
     }
 
-    const classTest1 = await readPart(categoryMeta.class_test_1.title);
-    const classTest2 = await readPart(categoryMeta.class_test_2.title);
-    const halfYearly = await readPart(categoryMeta.half_yearly.title);
-    const annual = await readPart(categoryMeta.annual.title);
+    const classTest1 = await readPart(categoryMeta.class_test_1);
+    const classTest2 = await readPart(categoryMeta.class_test_2);
+    const halfYearly = await readPart(categoryMeta.half_yearly);
+    const annual = await readPart(categoryMeta.annual);
 
     const rows = [];
     for (const student of students) {
@@ -506,10 +540,9 @@ export const saveCategoryMarks = mutation({
       .query("exams")
       .withIndex("by_class", (q) => q.eq("classId", args.classId))
       .take(80);
-    const existingExam = exams.find(
-      (item) =>
-        item.subjectId === args.subjectId &&
-        item.title.trim().toLowerCase() === meta.title.toLowerCase(),
+    const existingExam = pickCategoryExam(
+      exams.filter((item) => item.subjectId === args.subjectId),
+      meta,
     );
     const examId = existingExam
       ? existingExam._id
@@ -520,8 +553,15 @@ export const saveCategoryMarks = mutation({
           date: args.date,
           maxMarks: meta.maxMarks,
         });
-    if (existingExam && existingExam.maxMarks !== meta.maxMarks) {
-      await ctx.db.patch("exams", examId, { maxMarks: meta.maxMarks });
+    if (
+      existingExam &&
+      (existingExam.maxMarks !== meta.maxMarks ||
+        existingExam.title !== meta.title)
+    ) {
+      await ctx.db.patch("exams", examId, {
+        title: meta.title,
+        maxMarks: meta.maxMarks,
+      });
     }
 
     for (const mark of args.marks) {
@@ -592,32 +632,44 @@ export const printableReport = query({
       throw new Error("Class not found");
     }
     const meta = categoryMeta[args.category];
-    const linkedTitle =
+    const linkedMeta =
       args.category === "half_yearly"
-        ? categoryMeta.class_test_1.title
+        ? categoryMeta.class_test_1
         : args.category === "annual"
-          ? categoryMeta.class_test_2.title
+          ? categoryMeta.class_test_2
           : null;
     const exams = await ctx.db
       .query("exams")
       .withIndex("by_class", (q) => q.eq("classId", args.classId))
       .take(80);
-    const categoryExamBySubject = new Map(
-      exams
-        .filter(
-          (exam) => exam.title.trim().toLowerCase() === meta.title.toLowerCase(),
-        )
-        .map((exam) => [exam.subjectId, exam]),
-    );
-    const linkedExamBySubject = new Map(
-      exams
-        .filter(
-          (exam) =>
-            linkedTitle !== null &&
-            exam.title.trim().toLowerCase() === linkedTitle.toLowerCase(),
-        )
-        .map((exam) => [exam.subjectId, exam]),
-    );
+
+    function examsBySubject(target: CategoryMeta | null) {
+      const bySubject = new Map<
+        (typeof exams)[number]["subjectId"],
+        (typeof exams)[number]
+      >();
+      if (!target) {
+        return bySubject;
+      }
+      const subjectIds = new Set(
+        exams
+          .filter((exam) => matchesCategory(exam.title, target))
+          .map((exam) => exam.subjectId),
+      );
+      for (const subjectId of subjectIds) {
+        const exam = pickCategoryExam(
+          exams.filter((item) => item.subjectId === subjectId),
+          target,
+        );
+        if (exam) {
+          bySubject.set(subjectId, exam);
+        }
+      }
+      return bySubject;
+    }
+
+    const categoryExamBySubject = examsBySubject(meta);
+    const linkedExamBySubject = examsBySubject(linkedMeta);
 
     const subjectIds = [
       ...new Set([

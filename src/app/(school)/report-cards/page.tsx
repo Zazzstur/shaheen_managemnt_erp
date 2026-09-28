@@ -45,9 +45,9 @@ function gradeFor(percent: number) {
 }
 
 const CATEGORIES = [
-  { id: "class_test_1", label: "Class test 1 — 20", composite: false },
+  { id: "class_test_1", label: "Periodic test 1 — 20", composite: false },
   { id: "half_yearly", label: "Half yearly — 100", composite: true },
-  { id: "class_test_2", label: "Class test 2 — 20", composite: false },
+  { id: "class_test_2", label: "Periodic test 2 — 20", composite: false },
   { id: "annual", label: "Annual — 100", composite: true },
 ] as const;
 
@@ -168,7 +168,7 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
           <h1 className="text-2xl font-semibold tracking-tight">Report cards</h1>
           <p className="text-sm text-muted-foreground">
             Choose a class, subject, and category. Half yearly and annual are 80
-            written + 5 notebook + 5 subject enrichment + half of the class test.
+            written + 5 notebook + 5 subject enrichment + half of the periodic test.
           </p>
         </div>
       ) : null}
@@ -176,7 +176,7 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
         <CardHeader>
           <CardTitle>Subject marks</CardTitle>
           <CardDescription>
-            Class test 1 feeds half yearly. Class test 2 feeds annual.
+            Periodic test 1 feeds half yearly. Periodic test 2 feeds annual.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-3">
@@ -368,7 +368,7 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                             />
                           </div>
                           <div className="space-y-1">
-                            <p className="text-sm font-medium">Class test / 2</p>
+                            <p className="text-sm font-medium">Periodic test / 2</p>
                             <p className="flex h-9 items-center text-sm text-muted-foreground">
                               {classTestPart === null
                                 ? "Not entered"
@@ -418,6 +418,9 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
   );
 }
 
+const REPORT_TABLE_CLASS =
+  "border-collapse border border-[#876738] [&_td]:border [&_td]:border-[#876738]/60 [&_th]:border [&_th]:border-[#876738]/60 [&_th]:bg-[#876738]/10 [&_th]:font-semibold [&_tr]:hover:bg-transparent";
+
 function dash(value: number | null) {
   return value === null ? "—" : formatMark(value);
 }
@@ -427,7 +430,6 @@ export default function ReportCardsPage() {
   const classes = useQuery(api.catalog.listClasses);
   const [classId, setClassId] = useState<Id<"classes"> | "">("");
   const [category, setCategory] = useState<ReportCategory | "">("");
-  const [date, setDate] = useState(todayIso);
   const [studentId, setStudentId] = useState<Id<"students"> | "">("");
   const selectedCategory = CATEGORIES.find((item) => item.id === category);
   const report = useQuery(
@@ -436,6 +438,7 @@ export default function ReportCardsPage() {
   );
 
   const selected = report?.students.find((student) => student.studentId === studentId);
+  const markColumnCount = report?.composite ? 7 : 4;
   const totals = useMemo(() => {
     const lines = (selected?.lines ?? []).filter((line) => line.total !== null);
     const obtained = lines.reduce((sum, line) => sum + (line.total ?? 0), 0);
@@ -475,7 +478,7 @@ export default function ReportCardsPage() {
             Marks already saved by teachers appear here.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
+        <CardContent className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label>Class</Label>
             <Select
@@ -545,15 +548,6 @@ export default function ReportCardsPage() {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="report-date">Date on report</Label>
-            <Input
-              id="report-date"
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-            />
-          </div>
         </CardContent>
       </Card>
 
@@ -586,7 +580,33 @@ export default function ReportCardsPage() {
           </Card>
 
           {selected ? (
-            <Card>
+            <Card className="!gap-0 !bg-[#EBE9DC] !py-1.5 rounded-md border-[3px] border-[#876738] px-1.5 shadow-none ring-0! print:border-[3px] print:!bg-[#EBE9DC] print:shadow-none print:[print-color-adjust:exact]">
+              <div className="relative flex flex-col gap-4 border-[3px] border-[#876738] bg-[#EBE9DC] py-4 print:[print-color-adjust:exact]">
+              <Button
+                type="button"
+                variant="outline"
+                className="absolute top-3 right-4 print:hidden"
+                onClick={() => window.print()}
+              >
+                Print
+              </Button>
+              <div className="flex flex-col items-center gap-2 px-4 pt-1">
+                <img
+                  src="/shaheen-academy-logo.svg"
+                  alt="Shaheen Academy crest"
+                  className="h-28 w-auto"
+                />
+                <p className="text-center text-lg font-bold tracking-wide">
+                  SHAHEEN ACADEMY CHAMPARAN
+                </p>
+                <p className="-mt-1 text-center text-sm font-medium">
+                  ---Estd. 2025---
+                </p>
+                <p className="max-w-full text-center text-xs leading-snug text-balance">
+                  Shaheen Chowk Murli,Post. Pachpakari,P.S. Dhaka,Distt. East
+                  Champaran,Bihar-845427
+                </p>
+              </div>
               <CardHeader className="flex flex-row items-start justify-between gap-3">
                 <div>
                   <CardTitle>Report card</CardTitle>
@@ -594,51 +614,55 @@ export default function ReportCardsPage() {
                     {report.categoryTitle} · {report.classLabel}
                   </CardDescription>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="print:hidden"
-                  onClick={() => window.print()}
-                >
-                  Print
-                </Button>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid gap-1 text-sm">
-                  <p>
-                    <span className="text-muted-foreground">Student: </span>
-                    {selected.studentName}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Admission: </span>
-                    {selected.admissionNumber}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Parent: </span>
-                    {selected.guardianName ?? "—"}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Date: </span>
-                    {date}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Attendance: </span>
-                    {selected.attendancePercent === null
-                      ? "No records"
-                      : `${selected.attendancePercent}% (${selected.attendancePresent}/${selected.attendanceMarked} present)`}
-                  </p>
-                </div>
+                <Table className={REPORT_TABLE_CLASS}>
+                  <TableBody>
+                    <TableRow>
+                      <TableHead>Student</TableHead>
+                      <TableCell>{selected.studentName}</TableCell>
+                      <TableHead>Admission</TableHead>
+                      <TableCell>{selected.admissionNumber}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableHead>Parent</TableHead>
+                      <TableCell>{selected.guardianName ?? "—"}</TableCell>
+                      <TableHead>Attendance</TableHead>
+                      <TableCell>
+                        {selected.attendancePercent === null
+                          ? "No records"
+                          : `${selected.attendancePercent}% (${selected.attendancePresent}/${selected.attendanceMarked} present)`}
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
 
-                <Table>
+                <Table className={`${REPORT_TABLE_CLASS} table-fixed text-xs [&_td]:whitespace-normal [&_td]:px-1.5 [&_th]:whitespace-normal [&_th]:px-1.5`}>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Subject</TableHead>
                       {report.composite ? (
                         <>
-                          <TableHead>Written</TableHead>
-                          <TableHead>Notebook</TableHead>
-                          <TableHead>Enrichment</TableHead>
-                          <TableHead>Class test / 2</TableHead>
+                          <TableHead className="h-auto py-1.5 leading-tight">
+                            <span className="block">Written exam</span>
+                            <span className="block font-normal">(80)</span>
+                          </TableHead>
+                          <TableHead className="h-auto py-1.5 leading-tight">
+                            <span className="block">Notebook</span>
+                            <span className="block font-normal">(5)</span>
+                          </TableHead>
+                          <TableHead className="h-auto py-1.5 leading-tight">
+                            <span className="block">Subject enrichment</span>
+                            <span className="block font-normal">(5)</span>
+                          </TableHead>
+                          <TableHead className="h-auto py-1.5 leading-tight">
+                            <span className="block">
+                              {category === "annual"
+                                ? "Periodic test 2"
+                                : "Periodic test 1"}
+                            </span>
+                            <span className="block font-normal">(10)</span>
+                          </TableHead>
                           <TableHead>Total</TableHead>
                         </>
                       ) : (
@@ -647,13 +671,14 @@ export default function ReportCardsPage() {
                           <TableHead>Max</TableHead>
                         </>
                       )}
+                      <TableHead>Grade</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {selected.lines.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={report.composite ? 6 : 3}
+                          colSpan={markColumnCount}
                           className="text-muted-foreground"
                         >
                           No marks yet. Teachers enter these from their report
@@ -686,27 +711,74 @@ export default function ReportCardsPage() {
                               <TableCell>20</TableCell>
                             </>
                           )}
+                          <TableCell>
+                            {line.total === null || line.maxMarks === 0
+                              ? "—"
+                              : gradeFor((line.total / line.maxMarks) * 100)}
+                          </TableCell>
                         </TableRow>
                       ))
                     )}
+                    <TableRow className="font-semibold">
+                      <TableCell colSpan={markColumnCount - 2}>Total</TableCell>
+                      <TableCell colSpan={2}>
+                        {formatMark(totals.obtained)}
+                        {totals.maximum > 0 ? ` / ${totals.maximum}` : ""}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow className="font-semibold">
+                      <TableCell colSpan={markColumnCount - 2}>
+                        Percentage
+                      </TableCell>
+                      <TableCell colSpan={2}>
+                        {totals.percent === null ? "—" : `${totals.percent}%`}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow className="font-semibold">
+                      <TableCell colSpan={markColumnCount - 2}>Grade</TableCell>
+                      <TableCell colSpan={2}>
+                        {totals.percent === null
+                          ? "—"
+                          : gradeFor(totals.percent)}
+                      </TableCell>
+                    </TableRow>
                   </TableBody>
                 </Table>
 
-                <div className="grid gap-1 text-sm">
-                  <p>
-                    Total: {formatMark(totals.obtained)}
-                    {totals.maximum > 0 ? ` / ${totals.maximum}` : ""}
-                  </p>
-                  <p>
-                    Percentage:{" "}
-                    {totals.percent === null ? "—" : `${totals.percent}%`}
-                  </p>
-                  <p>
-                    Grade:{" "}
-                    {totals.percent === null ? "—" : gradeFor(totals.percent)}
-                  </p>
+                <div className="pt-2">
+                  <div className="flex h-6 items-end gap-2">
+                    <span className="text-sm leading-none font-semibold">
+                      Remark:
+                    </span>
+                    <div
+                      aria-hidden="true"
+                      className="flex-1 border-b-2 border-[#876738]"
+                    />
+                  </div>
+                  {[0, 1].map((line) => (
+                    <div
+                      key={line}
+                      aria-hidden="true"
+                      className="h-6 border-b-2 border-[#876738]"
+                    />
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-3 gap-8 pt-12 pb-2">
+                  {["Class teacher signature", "Parent signature", "School stamp"].map(
+                    (label) => (
+                      <div key={label} className="flex flex-col items-center gap-1.5">
+                        <div
+                          aria-hidden="true"
+                          className="w-full max-w-40 border-b border-[#876738]"
+                        />
+                        <p className="text-center text-xs">{label}</p>
+                      </div>
+                    ),
+                  )}
                 </div>
               </CardContent>
+              </div>
             </Card>
           ) : (
             <p className="text-sm text-muted-foreground print:hidden">

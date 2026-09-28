@@ -71,16 +71,16 @@ export default function StudentsDirectoryPage() {
   const isTeacher = me?.role === "teacher";
   const rows = useQuery(
     api.students.directory,
-    canEnroll
+    canEnroll && classId
       ? {
-          classId: classId || undefined,
+          classId,
           feeFilter,
         }
       : "skip",
   );
   const teacherRows = useQuery(
     api.students.teacherDirectory,
-    isTeacher ? { classId: classId || undefined } : "skip",
+    isTeacher && classId ? { classId } : "skip",
   );
 
   if (me === undefined) {
@@ -250,7 +250,7 @@ export default function StudentsDirectoryPage() {
                       );
                       return selected
                         ? `${selected.name} ${selected.section}`.trim()
-                        : "All classes";
+                        : "No classes";
                     })()}
                   </span>
                 </SelectTrigger>
@@ -310,7 +310,11 @@ export default function StudentsDirectoryPage() {
           </div>
 
           {isTeacher ? (
-            teacherRows === undefined ? (
+            !classId ? (
+              <p className="text-sm text-muted-foreground">
+                Select a class to see students.
+              </p>
+            ) : teacherRows === undefined ? (
               <p className="text-sm text-muted-foreground">Loading students…</p>
             ) : teacherRows.length === 0 ? (
               <p className="text-sm text-muted-foreground">
@@ -349,6 +353,10 @@ export default function StudentsDirectoryPage() {
                 </TableBody>
               </Table>
             )
+          ) : !classId ? (
+            <p className="text-sm text-muted-foreground">
+              Select a class to see students.
+            </p>
           ) : rows === undefined ? (
             <p className="text-sm text-muted-foreground">Loading students…</p>
           ) : rows.length === 0 ? (

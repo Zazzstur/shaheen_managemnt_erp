@@ -52,7 +52,7 @@ const enrollDefaults: EnrollStudentInput = {
   admissionNumber: "",
   fullName: "",
   dateOfBirth: "",
-  gender: "female",
+  gender: "",
   classId: "",
   placeOfBirth: "",
   religion: "",
@@ -114,45 +114,78 @@ export default function StudentsPage() {
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
+      const gender =
+        values.gender === "female" ||
+        values.gender === "male" ||
+        values.gender === "other"
+          ? values.gender
+          : undefined;
+      const socialCategory =
+        values.socialCategory === "general" ||
+        values.socialCategory === "obc" ||
+        values.socialCategory === "sc" ||
+        values.socialCategory === "st"
+          ? values.socialCategory
+          : undefined;
+      const previousSchoolAffiliation =
+        values.previousSchoolAffiliation === "state" ||
+        values.previousSchoolAffiliation === "cbse" ||
+        values.previousSchoolAffiliation === "icse" ||
+        values.previousSchoolAffiliation === "other"
+          ? values.previousSchoolAffiliation
+          : undefined;
       await enroll({
-        admissionNumber: values.admissionNumber,
+        ...(values.admissionNumber.trim()
+          ? { admissionNumber: values.admissionNumber.trim() }
+          : {}),
         fullName: values.fullName,
-        dateOfBirth: values.dateOfBirth,
-        gender: values.gender,
+        ...(values.dateOfBirth ? { dateOfBirth: values.dateOfBirth } : {}),
+        ...(gender ? { gender } : {}),
         classId: values.classId as Id<"classes">,
         guardianName: values.guardianName,
         guardianPhone: values.guardianPhone,
-        aadhaarNumber: values.aadhaarNumber,
-        placeOfBirth: values.placeOfBirth,
-        religion: values.religion,
-        caste: values.caste,
-        motherTongue: values.motherTongue,
-        socialCategory:
-          values.socialCategory === "general" ||
-          values.socialCategory === "obc" ||
-          values.socialCategory === "sc" ||
-          values.socialCategory === "st"
-            ? values.socialCategory
-            : "general",
-        motherName: values.motherName,
-        fatherAadhaarNumber: values.fatherAadhaarNumber,
-        motherAadhaarNumber: values.motherAadhaarNumber,
-        motherPhone: values.motherPhone,
-        email: values.email,
-        residentialAddress: values.residentialAddress,
-        transportRequired: values.transportRequired === "yes",
-        previousSchoolAffiliation:
-          values.previousSchoolAffiliation === "state" ||
-          values.previousSchoolAffiliation === "cbse" ||
-          values.previousSchoolAffiliation === "icse" ||
-          values.previousSchoolAffiliation === "other"
-            ? values.previousSchoolAffiliation
-            : "state",
-        previousSchoolOther: values.previousSchoolOther,
-        previousSchoolName: values.previousSchoolName,
+        ...(values.aadhaarNumber
+          ? { aadhaarNumber: values.aadhaarNumber }
+          : {}),
+        ...(values.placeOfBirth.trim()
+          ? { placeOfBirth: values.placeOfBirth }
+          : {}),
+        ...(values.religion.trim() ? { religion: values.religion } : {}),
+        ...(values.caste.trim() ? { caste: values.caste } : {}),
+        ...(values.motherTongue.trim()
+          ? { motherTongue: values.motherTongue }
+          : {}),
+        ...(socialCategory ? { socialCategory } : {}),
+        ...(values.motherName.trim() ? { motherName: values.motherName } : {}),
+        ...(values.fatherAadhaarNumber
+          ? { fatherAadhaarNumber: values.fatherAadhaarNumber }
+          : {}),
+        ...(values.motherAadhaarNumber
+          ? { motherAadhaarNumber: values.motherAadhaarNumber }
+          : {}),
+        ...(values.motherPhone ? { motherPhone: values.motherPhone } : {}),
+        ...(values.email.trim() ? { email: values.email } : {}),
+        ...(values.residentialAddress.trim()
+          ? { residentialAddress: values.residentialAddress }
+          : {}),
+        ...(values.transportRequired === "yes" ||
+        values.transportRequired === "no"
+          ? { transportRequired: values.transportRequired === "yes" }
+          : {}),
+        ...(previousSchoolAffiliation
+          ? { previousSchoolAffiliation }
+          : {}),
+        ...(previousSchoolAffiliation === "other"
+          ? { previousSchoolOther: values.previousSchoolOther }
+          : {}),
+        ...(values.previousSchoolName.trim()
+          ? { previousSchoolName: values.previousSchoolName }
+          : {}),
         discountType: values.discountType,
         discountValue: values.discountValue,
-        discountReason: values.discountReason,
+        ...(values.discountReason?.trim()
+          ? { discountReason: values.discountReason }
+          : {}),
       });
       toast.success("Student enrolled");
       form.reset(enrollDefaults);
@@ -174,7 +207,7 @@ export default function StudentsPage() {
         <CardHeader>
           <CardTitle>Enroll student</CardTitle>
           <CardDescription>
-            Student, parent, and previous school details are required, along with the class.
+            Student name, class, father name, and father mobile are required. Every other field is optional.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -197,7 +230,6 @@ export default function StudentsPage() {
             <div className="space-y-2">
               <Label htmlFor="dateOfBirth">
                 Date of birth
-                <RequiredMark />
               </Label>
               <Input id="dateOfBirth" type="date" {...form.register("dateOfBirth")} />
               {form.formState.errors.dateOfBirth ? (
@@ -209,7 +241,6 @@ export default function StudentsPage() {
             <div className="space-y-2">
               <Label htmlFor="placeOfBirth">
                 Place of birth
-                <RequiredMark />
               </Label>
               <Input id="placeOfBirth" {...form.register("placeOfBirth")} />
               {form.formState.errors.placeOfBirth ? (
@@ -221,10 +252,9 @@ export default function StudentsPage() {
             <div className="space-y-2">
               <Label>
                 Gender
-                <RequiredMark />
               </Label>
               <Select
-                value={form.watch("gender")}
+                value={form.watch("gender") || null}
                 items={{
                   female: "Female",
                   male: "Male",
@@ -237,7 +267,7 @@ export default function StudentsPage() {
                 }}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue />
+                  <SelectValue placeholder="Optional" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="female">Female</SelectItem>
@@ -249,7 +279,6 @@ export default function StudentsPage() {
             <div className="space-y-2">
               <Label htmlFor="religion">
                 Religion
-                <RequiredMark />
               </Label>
               <Input id="religion" {...form.register("religion")} />
               {form.formState.errors.religion ? (
@@ -261,7 +290,6 @@ export default function StudentsPage() {
             <div className="space-y-2">
               <Label htmlFor="caste">
                 Caste
-                <RequiredMark />
               </Label>
               <Input id="caste" {...form.register("caste")} />
               {form.formState.errors.caste ? (
@@ -273,7 +301,6 @@ export default function StudentsPage() {
             <div className="space-y-2">
               <Label htmlFor="motherTongue">
                 Mother tongue
-                <RequiredMark />
               </Label>
               <Input id="motherTongue" {...form.register("motherTongue")} />
               {form.formState.errors.motherTongue ? (
@@ -285,7 +312,6 @@ export default function StudentsPage() {
             <div className="space-y-2 md:col-span-2">
               <Label>
                 Social category
-                <RequiredMark />
               </Label>
               <div className="flex flex-wrap gap-4">
                 {(
@@ -320,7 +346,6 @@ export default function StudentsPage() {
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="aadhaarNumber">
                 Student Aadhaar number
-                <RequiredMark />
               </Label>
               <Input
                 id="aadhaarNumber"
@@ -338,7 +363,6 @@ export default function StudentsPage() {
             <div className="space-y-2">
               <Label htmlFor="admissionNumber">
                 Admission number
-                <RequiredMark />
               </Label>
               <Input id="admissionNumber" {...form.register("admissionNumber")} />
               {form.formState.errors.admissionNumber ? (
@@ -470,7 +494,6 @@ export default function StudentsPage() {
             <div className="space-y-2">
               <Label htmlFor="motherName">
                 Mother name
-                <RequiredMark />
               </Label>
               <Input id="motherName" {...form.register("motherName")} />
               {form.formState.errors.motherName ? (
@@ -482,7 +505,6 @@ export default function StudentsPage() {
             <div className="space-y-2">
               <Label htmlFor="fatherAadhaarNumber">
                 Father&apos;s Aadhaar number
-                <RequiredMark />
               </Label>
               <Input
                 id="fatherAadhaarNumber"
@@ -500,7 +522,6 @@ export default function StudentsPage() {
             <div className="space-y-2">
               <Label htmlFor="motherAadhaarNumber">
                 Mother&apos;s Aadhaar number
-                <RequiredMark />
               </Label>
               <Input
                 id="motherAadhaarNumber"
@@ -536,7 +557,6 @@ export default function StudentsPage() {
             <div className="space-y-2">
               <Label htmlFor="motherPhone">
                 Mother mobile
-                <RequiredMark />
               </Label>
               <Input
                 id="motherPhone"
@@ -554,7 +574,6 @@ export default function StudentsPage() {
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="email">
                 Email
-                <RequiredMark />
               </Label>
               <Input id="email" type="email" autoComplete="email" {...form.register("email")} />
               {form.formState.errors.email ? (
@@ -566,7 +585,6 @@ export default function StudentsPage() {
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="residentialAddress">
                 Residential address
-                <RequiredMark />
               </Label>
               <Textarea id="residentialAddress" {...form.register("residentialAddress")} />
               {form.formState.errors.residentialAddress ? (
@@ -578,7 +596,6 @@ export default function StudentsPage() {
             <div className="space-y-2 md:col-span-2">
               <Label>
                 School transportation required
-                <RequiredMark />
               </Label>
               <div className="flex gap-4">
                 {(
@@ -614,7 +631,6 @@ export default function StudentsPage() {
             <div className="space-y-2 md:col-span-2">
               <Label>
                 Previous school affiliation
-                <RequiredMark />
               </Label>
               <div className="flex flex-wrap items-center gap-4">
                 {(
@@ -668,7 +684,6 @@ export default function StudentsPage() {
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="previousSchoolName">
                 Previous school name
-                <RequiredMark />
               </Label>
               <Input id="previousSchoolName" {...form.register("previousSchoolName")} />
               {form.formState.errors.previousSchoolName ? (
@@ -733,7 +748,7 @@ export default function StudentsPage() {
                     <TableCell>{student.admissionNumber}</TableCell>
                     <TableCell>{student.name}</TableCell>
                     <TableCell>{student.classLabel}</TableCell>
-                    <TableCell>{student.dateOfBirth}</TableCell>
+                    <TableCell>{student.dateOfBirth ?? "—"}</TableCell>
                     <TableCell>{student.guardianName ?? "—"}</TableCell>
                     <TableCell>{student.guardianPhone ?? "—"}</TableCell>
                     <TableCell>{student.aadhaarNumber ?? "—"}</TableCell>

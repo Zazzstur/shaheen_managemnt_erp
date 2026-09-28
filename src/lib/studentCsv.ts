@@ -210,30 +210,10 @@ export function parseStudentCsv(text: string): StudentCsvRow[] {
 
   const columns = header.map((cell) => HEADER_ALIASES[normalizeHeader(cell)]);
   const required = [
-    "admissionNumber",
     "fullName",
-    "dateOfBirth",
-    "placeOfBirth",
-    "gender",
-    "religion",
-    "caste",
-    "motherTongue",
-    "socialCategory",
     "className",
-    "section",
     "fatherName",
-    "motherName",
-    "fatherAadhaarNumber",
-    "motherAadhaarNumber",
     "fatherMobile",
-    "motherMobile",
-    "aadhaarNumber",
-    "email",
-    "residentialAddress",
-    "transportRequired",
-    "previousSchoolAffiliation",
-    "previousSchoolOther",
-    "previousSchoolName",
   ] as const;
   const missing = required.filter((key) => !columns.includes(key));
   if (missing.length > 0) {

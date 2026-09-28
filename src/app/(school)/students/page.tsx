@@ -153,17 +153,18 @@ export default function StudentsDirectoryPage() {
           <CardHeader>
             <CardTitle>Bulk upload</CardTitle>
             <CardDescription>
-              Download the CSV template, fill one student per row, then upload
-              it. Required columns match the admission form: student details,
-              parent details, and previous school. Social category is general,
-              obc, sc, or st. Previous school affiliation is state, cbse, icse,
-              or other. Transport required is yes or no. Class name and section
-              must match an existing class. Date of birth can be YYYY-MM-DD or
-              DD-MM-YYYY. Gender is female, male, or other. Put addresses that
-              contain commas in quotes. Fill either discount amount or discount
-              percent, and write the reason in description when a discount is
-              given. Admission date and amount paid calculate class fees from
-              that date and subtract what the student has already paid.
+              Download the CSV template and fill one student per row. Required
+              columns are full name, class name, father name, and father
+              mobile. Every other column is optional. If a class name has more
+              than one section, fill the section column. When you fill an
+              optional column, use the same values as the form: social category
+              is general, obc, sc, or st; affiliation is state, cbse, icse, or
+              other; transport required is yes or no; gender is female, male,
+              or other. Date of birth can be YYYY-MM-DD or DD-MM-YYYY. Put
+              addresses that contain commas in quotes. Fill either discount
+              amount or discount percent, and write the reason in description
+              when a discount is given. If an amount paid is entered, also
+              enter the admission date.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

@@ -29,7 +29,7 @@ type Draft = {
   admissionNumber: string;
   fullName: string;
   dateOfBirth: string;
-  gender: "female" | "male" | "other";
+  gender: "" | "female" | "male" | "other";
   placeOfBirth: string;
   religion: string;
   caste: string;
@@ -107,8 +107,8 @@ export function StudentDetailDialog({
     setDraft({
       admissionNumber: profile.admissionNumber,
       fullName: profile.fullName,
-      dateOfBirth: profile.dateOfBirth,
-      gender: profile.gender,
+      dateOfBirth: profile.dateOfBirth ?? "",
+      gender: profile.gender ?? "",
       placeOfBirth: profile.placeOfBirth ?? "",
       religion: profile.religion ?? "",
       caste: profile.caste ?? "",
@@ -140,56 +140,88 @@ export function StudentDetailDialog({
     if (!studentId || !draft) {
       return;
     }
-    const socialCategory = draft.socialCategory;
-    const affiliation = draft.previousSchoolAffiliation;
-    if (
-      socialCategory !== "general" &&
-      socialCategory !== "obc" &&
-      socialCategory !== "sc" &&
-      socialCategory !== "st"
-    ) {
-      toast.error("Select a social category");
+    if (!draft.fullName.trim()) {
+      toast.error("Student name is required");
       return;
     }
-    if (draft.transportRequired !== "yes" && draft.transportRequired !== "no") {
-      toast.error("Select whether school transportation is required");
+    if (!draft.guardianName.trim()) {
+      toast.error("Father name is required");
       return;
     }
-    if (
-      affiliation !== "state" &&
-      affiliation !== "cbse" &&
-      affiliation !== "icse" &&
-      affiliation !== "other"
-    ) {
-      toast.error("Select the previous school affiliation");
+    if (!draft.guardianPhone.trim()) {
+      toast.error("Father mobile is required");
       return;
     }
+    const socialCategory =
+      draft.socialCategory === "general" ||
+      draft.socialCategory === "obc" ||
+      draft.socialCategory === "sc" ||
+      draft.socialCategory === "st"
+        ? draft.socialCategory
+        : undefined;
+    const affiliation =
+      draft.previousSchoolAffiliation === "state" ||
+      draft.previousSchoolAffiliation === "cbse" ||
+      draft.previousSchoolAffiliation === "icse" ||
+      draft.previousSchoolAffiliation === "other"
+        ? draft.previousSchoolAffiliation
+        : undefined;
+    if (affiliation === "other" && !draft.previousSchoolOther.trim()) {
+      toast.error("Enter the previous school affiliation");
+      return;
+    }
+    const gender =
+      draft.gender === "female" ||
+      draft.gender === "male" ||
+      draft.gender === "other"
+        ? draft.gender
+        : undefined;
     setSaving(true);
     try {
       await updateProfile({
         studentId,
-        admissionNumber: draft.admissionNumber,
+        ...(draft.admissionNumber.trim()
+          ? { admissionNumber: draft.admissionNumber.trim() }
+          : {}),
         fullName: draft.fullName,
-        dateOfBirth: draft.dateOfBirth,
-        gender: draft.gender,
-        placeOfBirth: draft.placeOfBirth,
-        religion: draft.religion,
-        caste: draft.caste,
-        motherTongue: draft.motherTongue,
-        socialCategory,
+        ...(draft.dateOfBirth ? { dateOfBirth: draft.dateOfBirth } : {}),
+        ...(gender ? { gender } : {}),
+        ...(draft.placeOfBirth.trim()
+          ? { placeOfBirth: draft.placeOfBirth }
+          : {}),
+        ...(draft.religion.trim() ? { religion: draft.religion } : {}),
+        ...(draft.caste.trim() ? { caste: draft.caste } : {}),
+        ...(draft.motherTongue.trim()
+          ? { motherTongue: draft.motherTongue }
+          : {}),
+        ...(socialCategory ? { socialCategory } : {}),
         guardianName: draft.guardianName,
-        motherName: draft.motherName,
+        ...(draft.motherName.trim() ? { motherName: draft.motherName } : {}),
         guardianPhone: draft.guardianPhone,
-        motherPhone: draft.motherPhone,
-        aadhaarNumber: draft.aadhaarNumber,
-        fatherAadhaarNumber: draft.fatherAadhaarNumber,
-        motherAadhaarNumber: draft.motherAadhaarNumber,
-        email: draft.email,
-        residentialAddress: draft.residentialAddress,
-        transportRequired: draft.transportRequired === "yes",
-        previousSchoolAffiliation: affiliation,
-        previousSchoolOther: draft.previousSchoolOther,
-        previousSchoolName: draft.previousSchoolName,
+        ...(draft.motherPhone.trim() ? { motherPhone: draft.motherPhone } : {}),
+        ...(draft.aadhaarNumber.trim()
+          ? { aadhaarNumber: draft.aadhaarNumber }
+          : {}),
+        ...(draft.fatherAadhaarNumber.trim()
+          ? { fatherAadhaarNumber: draft.fatherAadhaarNumber }
+          : {}),
+        ...(draft.motherAadhaarNumber.trim()
+          ? { motherAadhaarNumber: draft.motherAadhaarNumber }
+          : {}),
+        ...(draft.email.trim() ? { email: draft.email } : {}),
+        ...(draft.residentialAddress.trim()
+          ? { residentialAddress: draft.residentialAddress }
+          : {}),
+        ...(draft.transportRequired === "yes" || draft.transportRequired === "no"
+          ? { transportRequired: draft.transportRequired === "yes" }
+          : {}),
+        ...(affiliation ? { previousSchoolAffiliation: affiliation } : {}),
+        ...(affiliation === "other"
+          ? { previousSchoolOther: draft.previousSchoolOther }
+          : {}),
+        ...(draft.previousSchoolName.trim()
+          ? { previousSchoolName: draft.previousSchoolName }
+          : {}),
       });
       toast.success("Student details saved");
       setEditing(false);
@@ -266,7 +298,7 @@ export function StudentDetailDialog({
                   : `${profile.attendancePercent}% (${profile.attendancePresent}/${profile.attendanceMarked} present)`
               }
             />
-            <Field label="Admission number" required>
+            <Field label="Admission number">
               <Input
                 value={draft.admissionNumber}
                 onChange={(event) =>
@@ -282,7 +314,7 @@ export function StudentDetailDialog({
                 }
               />
             </Field>
-            <Field label="Date of birth" required>
+            <Field label="Date of birth">
               <Input
                 type="date"
                 value={draft.dateOfBirth}
@@ -291,7 +323,7 @@ export function StudentDetailDialog({
                 }
               />
             </Field>
-            <Field label="Place of birth" required>
+            <Field label="Place of birth">
               <Input
                 value={draft.placeOfBirth}
                 onChange={(event) =>
@@ -299,9 +331,9 @@ export function StudentDetailDialog({
                 }
               />
             </Field>
-            <Field label="Gender" required>
+            <Field label="Gender">
               <Select
-                value={draft.gender}
+                value={draft.gender || null}
                 items={{ female: "Female", male: "Male", other: "Other" }}
                 onValueChange={(value) => {
                   if (value === "female" || value === "male" || value === "other") {
@@ -319,7 +351,7 @@ export function StudentDetailDialog({
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Religion" required>
+            <Field label="Religion">
               <Input
                 value={draft.religion}
                 onChange={(event) =>
@@ -327,7 +359,7 @@ export function StudentDetailDialog({
                 }
               />
             </Field>
-            <Field label="Caste" required>
+            <Field label="Caste">
               <Input
                 value={draft.caste}
                 onChange={(event) =>
@@ -335,7 +367,7 @@ export function StudentDetailDialog({
                 }
               />
             </Field>
-            <Field label="Mother tongue" required>
+            <Field label="Mother tongue">
               <Input
                 value={draft.motherTongue}
                 onChange={(event) =>
@@ -343,7 +375,7 @@ export function StudentDetailDialog({
                 }
               />
             </Field>
-            <Field label="Social category" required className="md:col-span-2">
+            <Field label="Social category" className="md:col-span-2">
               <div className="flex flex-wrap gap-4">
                 {SOCIAL.map(([value, label]) => (
                   <label key={value} className="flex items-center gap-2 text-sm">
@@ -359,7 +391,7 @@ export function StudentDetailDialog({
                 ))}
               </div>
             </Field>
-            <Field label="Student Aadhaar number" required>
+            <Field label="Student Aadhaar number">
               <Input
                 inputMode="numeric"
                 value={draft.aadhaarNumber}
@@ -376,7 +408,7 @@ export function StudentDetailDialog({
                 }
               />
             </Field>
-            <Field label="Mother name" required>
+            <Field label="Mother name">
               <Input
                 value={draft.motherName}
                 onChange={(event) =>
@@ -393,7 +425,7 @@ export function StudentDetailDialog({
                 }
               />
             </Field>
-            <Field label="Mother mobile" required>
+            <Field label="Mother mobile">
               <Input
                 inputMode="numeric"
                 value={draft.motherPhone}
@@ -402,7 +434,7 @@ export function StudentDetailDialog({
                 }
               />
             </Field>
-            <Field label="Father's Aadhaar number" required>
+            <Field label="Father's Aadhaar number">
               <Input
                 inputMode="numeric"
                 value={draft.fatherAadhaarNumber}
@@ -411,7 +443,7 @@ export function StudentDetailDialog({
                 }
               />
             </Field>
-            <Field label="Mother's Aadhaar number" required>
+            <Field label="Mother's Aadhaar number">
               <Input
                 inputMode="numeric"
                 value={draft.motherAadhaarNumber}
@@ -420,7 +452,7 @@ export function StudentDetailDialog({
                 }
               />
             </Field>
-            <Field label="Email" required className="md:col-span-2">
+            <Field label="Email" className="md:col-span-2">
               <Input
                 type="email"
                 value={draft.email}
@@ -429,7 +461,7 @@ export function StudentDetailDialog({
                 }
               />
             </Field>
-            <Field label="Residential address" required className="md:col-span-2">
+            <Field label="Residential address" className="md:col-span-2">
               <Textarea
                 value={draft.residentialAddress}
                 onChange={(event) =>
@@ -437,7 +469,7 @@ export function StudentDetailDialog({
                 }
               />
             </Field>
-            <Field label="School transportation required" required className="md:col-span-2">
+            <Field label="School transportation required" className="md:col-span-2">
               <div className="flex gap-4">
                 {(
                   [
@@ -458,7 +490,7 @@ export function StudentDetailDialog({
                 ))}
               </div>
             </Field>
-            <Field label="Previous school affiliation" required className="md:col-span-2">
+            <Field label="Previous school affiliation" className="md:col-span-2">
               <div className="flex flex-wrap items-center gap-4">
                 {AFFILIATIONS.map(([value, label]) => (
                   <label key={value} className="flex items-center gap-2 text-sm">
@@ -487,7 +519,7 @@ export function StudentDetailDialog({
                 ) : null}
               </div>
             </Field>
-            <Field label="Previous school name" required className="md:col-span-2">
+            <Field label="Previous school name" className="md:col-span-2">
               <Input
                 value={draft.previousSchoolName}
                 onChange={(event) =>
@@ -500,9 +532,9 @@ export function StudentDetailDialog({
           <div className="grid gap-3 sm:grid-cols-2">
             <Detail label="Admission number" value={profile.admissionNumber} />
             <Detail label="Class" value={profile.classLabel} />
-            <Detail label="Date of birth" value={profile.dateOfBirth} />
+            <Detail label="Date of birth" value={text(profile.dateOfBirth)} />
             <Detail label="Place of birth" value={text(profile.placeOfBirth)} />
-            <Detail label="Gender" value={profile.gender} />
+            <Detail label="Gender" value={text(profile.gender)} />
             <Detail label="Religion" value={text(profile.religion)} />
             <Detail label="Caste" value={text(profile.caste)} />
             <Detail label="Mother tongue" value={text(profile.motherTongue)} />

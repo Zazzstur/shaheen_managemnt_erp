@@ -159,17 +159,33 @@ function digitsFromCell(value: string) {
   return withoutDecimal.replace(/\D/g, "");
 }
 
+async function allocateAdmissionNumber(ctx: MutationCtx) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const admissionNumber = `ADM${Date.now().toString(36).toUpperCase()}${attempt}`;
+    const existing = await ctx.db
+      .query("students")
+      .withIndex("by_admission_number", (q) =>
+        q.eq("admissionNumber", admissionNumber),
+      )
+      .unique();
+    if (!existing) {
+      return admissionNumber;
+    }
+  }
+  throw new Error("Could not assign an admission number");
+}
+
 async function insertEnrolledStudent(
   ctx: MutationCtx,
   args: {
-    admissionNumber: string;
+    admissionNumber?: string;
     fullName: string;
-    dateOfBirth: string;
-    gender: (typeof genderValues)[number];
+    dateOfBirth?: string;
+    gender?: (typeof genderValues)[number];
     classId: Id<"classes">;
     guardianName?: string;
     guardianPhone: string;
-    aadhaarNumber: string;
+    aadhaarNumber?: string;
     placeOfBirth?: string;
     religion?: string;
     caste?: string;
@@ -193,13 +209,17 @@ async function insertEnrolledStudent(
     admissionDate?: string;
   },
 ) {
-  const admissionNumber = args.admissionNumber.trim();
-  const fullName = args.fullName.trim();
-  if (!admissionNumber || !fullName) {
-    throw new Error("Admission number and student name are required");
+  const fullName = requireText(args.fullName, "Student name");
+  const guardianName = requireText(args.guardianName ?? "", "Father name");
+  let admissionNumber = args.admissionNumber?.trim() ?? "";
+  if (!admissionNumber) {
+    admissionNumber = await allocateAdmissionNumber(ctx);
   }
-  const dateOfBirth = parseDateOfBirth(args.dateOfBirth);
-  if (!dateOfBirth) {
+  const rawDateOfBirth = args.dateOfBirth?.trim() ?? "";
+  const dateOfBirth = rawDateOfBirth
+    ? parseDateOfBirth(rawDateOfBirth)
+    : undefined;
+  if (rawDateOfBirth && !dateOfBirth) {
     throw new Error("Date of birth must be YYYY-MM-DD");
   }
   const classroom = await ctx.db.get("classes", args.classId);
@@ -215,19 +235,21 @@ async function insertEnrolledStudent(
   if (duplicate) {
     throw new Error("Admission number already exists");
   }
-  const guardianPhone = digitsFromCell(args.guardianPhone);
-  const aadhaarNumber = digitsFromCell(args.aadhaarNumber);
-  if (/e\+/i.test(guardianPhone) || /e\+/i.test(aadhaarNumber)) {
-    throw new Error(
-      "Format parent number and Aadhaar as text in the spreadsheet",
-    );
-  }
-  if (!/^[6-9]\d{9}$/.test(guardianPhone)) {
-    throw new Error("Enter a 10-digit parent mobile number");
-  }
-  if (!/^\d{12}$/.test(aadhaarNumber)) {
-    throw new Error("Aadhaar number must be 12 digits");
-  }
+  const guardianPhone = requireMobile(args.guardianPhone, "Father mobile");
+  const aadhaarNumber = optionalAadhaar(
+    args.aadhaarNumber,
+    "Student Aadhaar number",
+  );
+  const fatherAadhaarNumber = optionalAadhaar(
+    args.fatherAadhaarNumber,
+    "Father's Aadhaar number",
+  );
+  const motherAadhaarNumber = optionalAadhaar(
+    args.motherAadhaarNumber,
+    "Mother's Aadhaar number",
+  );
+  const motherPhone = optionalMobile(args.motherPhone, "Mother mobile");
+  const email = optionalEmail(args.email);
   if (args.guardianUserId) {
     const guardian = await ctx.db.get("users", args.guardianUserId);
     if (!guardian || guardian.role !== "parent") {
@@ -253,7 +275,6 @@ async function insertEnrolledStudent(
       throw new Error("Describe why the discount is given");
     }
   }
-  const guardianName = args.guardianName?.trim();
   const admissionDate = args.admissionDate
     ? parseDateOfBirth(args.admissionDate)
     : undefined;
@@ -263,28 +284,44 @@ async function insertEnrolledStudent(
   return await ctx.db.insert("students", {
     admissionNumber,
     fullName,
-    dateOfBirth,
-    gender: args.gender,
+    ...(dateOfBirth ? { dateOfBirth } : {}),
+    ...(args.gender ? { gender: args.gender } : {}),
     classId: args.classId,
     guardianUserId: args.guardianUserId,
-    guardianName: guardianName || undefined,
+    guardianName,
     guardianPhone,
-    aadhaarNumber,
-    placeOfBirth: args.placeOfBirth,
-    religion: args.religion,
-    caste: args.caste,
-    motherTongue: args.motherTongue,
-    socialCategory: args.socialCategory,
-    motherName: args.motherName,
-    fatherAadhaarNumber: args.fatherAadhaarNumber,
-    motherAadhaarNumber: args.motherAadhaarNumber,
-    motherPhone: args.motherPhone,
-    email: args.email,
-    residentialAddress: args.residentialAddress,
-    transportRequired: args.transportRequired,
-    previousSchoolAffiliation: args.previousSchoolAffiliation,
-    previousSchoolOther: args.previousSchoolOther,
-    previousSchoolName: args.previousSchoolName,
+    ...(aadhaarNumber ? { aadhaarNumber } : {}),
+    ...(optionalText(args.placeOfBirth)
+      ? { placeOfBirth: optionalText(args.placeOfBirth) }
+      : {}),
+    ...(optionalText(args.religion) ? { religion: optionalText(args.religion) } : {}),
+    ...(optionalText(args.caste) ? { caste: optionalText(args.caste) } : {}),
+    ...(optionalText(args.motherTongue)
+      ? { motherTongue: optionalText(args.motherTongue) }
+      : {}),
+    ...(args.socialCategory ? { socialCategory: args.socialCategory } : {}),
+    ...(optionalText(args.motherName)
+      ? { motherName: optionalText(args.motherName) }
+      : {}),
+    ...(fatherAadhaarNumber ? { fatherAadhaarNumber } : {}),
+    ...(motherAadhaarNumber ? { motherAadhaarNumber } : {}),
+    ...(motherPhone ? { motherPhone } : {}),
+    ...(email ? { email } : {}),
+    ...(optionalText(args.residentialAddress)
+      ? { residentialAddress: optionalText(args.residentialAddress) }
+      : {}),
+    ...(args.transportRequired !== undefined
+      ? { transportRequired: args.transportRequired }
+      : {}),
+    ...(args.previousSchoolAffiliation
+      ? { previousSchoolAffiliation: args.previousSchoolAffiliation }
+      : {}),
+    ...(optionalText(args.previousSchoolOther)
+      ? { previousSchoolOther: optionalText(args.previousSchoolOther) }
+      : {}),
+    ...(optionalText(args.previousSchoolName)
+      ? { previousSchoolName: optionalText(args.previousSchoolName) }
+      : {}),
     userId: args.userId,
     status: "enrolled",
     discountType: discountValue > 0 ? args.discountType : undefined,
@@ -293,6 +330,38 @@ async function insertEnrolledStudent(
       discountValue > 0 ? args.discountReason?.trim() : undefined,
     admissionDate: admissionDate ?? undefined,
   });
+}
+
+function optionalText(value: string | undefined) {
+  const trimmed = value?.trim() ?? "";
+  return trimmed || undefined;
+}
+
+function optionalEmail(value: string | undefined) {
+  const email = value?.trim() ?? "";
+  if (!email) {
+    return undefined;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("Enter a valid email");
+  }
+  return email;
+}
+
+function optionalMobile(value: string | undefined, label: string) {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return undefined;
+  }
+  return requireMobile(trimmed, label);
+}
+
+function optionalAadhaar(value: string | undefined, label: string) {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return undefined;
+  }
+  return requireAadhaar(trimmed, label);
 }
 
 function requireText(value: string, label: string) {
@@ -321,30 +390,30 @@ function requireAadhaar(value: string, label: string) {
 
 export const enroll = mutation({
   args: {
-    admissionNumber: v.string(),
+    admissionNumber: v.optional(v.string()),
     fullName: v.string(),
-    dateOfBirth: v.string(),
-    gender: genderValidator,
+    dateOfBirth: v.optional(v.string()),
+    gender: v.optional(genderValidator),
     classId: v.id("classes"),
     guardianUserId: v.optional(v.id("users")),
     guardianName: v.string(),
     guardianPhone: v.string(),
-    aadhaarNumber: v.string(),
-    placeOfBirth: v.string(),
-    religion: v.string(),
-    caste: v.string(),
-    motherTongue: v.string(),
-    socialCategory: socialCategoryValidator,
-    motherName: v.string(),
-    fatherAadhaarNumber: v.string(),
-    motherAadhaarNumber: v.string(),
-    motherPhone: v.string(),
-    email: v.string(),
-    residentialAddress: v.string(),
-    transportRequired: v.boolean(),
-    previousSchoolAffiliation: schoolAffiliationValidator,
+    aadhaarNumber: v.optional(v.string()),
+    placeOfBirth: v.optional(v.string()),
+    religion: v.optional(v.string()),
+    caste: v.optional(v.string()),
+    motherTongue: v.optional(v.string()),
+    socialCategory: v.optional(socialCategoryValidator),
+    motherName: v.optional(v.string()),
+    fatherAadhaarNumber: v.optional(v.string()),
+    motherAadhaarNumber: v.optional(v.string()),
+    motherPhone: v.optional(v.string()),
+    email: v.optional(v.string()),
+    residentialAddress: v.optional(v.string()),
+    transportRequired: v.optional(v.boolean()),
+    previousSchoolAffiliation: v.optional(schoolAffiliationValidator),
     previousSchoolOther: v.optional(v.string()),
-    previousSchoolName: v.string(),
+    previousSchoolName: v.optional(v.string()),
     userId: v.optional(v.id("users")),
     discountType: v.optional(v.union(v.literal("percent"), v.literal("amount"))),
     discountValue: v.optional(v.number()),
@@ -353,40 +422,12 @@ export const enroll = mutation({
   returns: v.id("students"),
   handler: async (ctx, args) => {
     await requireRoles(ctx, ["super_admin"]);
-    const email = requireText(args.email, "Email");
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new Error("Enter a valid email");
-    }
     const previousSchoolOther = args.previousSchoolOther?.trim() ?? "";
     if (args.previousSchoolAffiliation === "other" && !previousSchoolOther) {
       throw new Error("Enter the previous school affiliation");
     }
     return await insertEnrolledStudent(ctx, {
       ...args,
-      guardianName: requireText(args.guardianName, "Father name"),
-      placeOfBirth: requireText(args.placeOfBirth, "Place of birth"),
-      religion: requireText(args.religion, "Religion"),
-      caste: requireText(args.caste, "Caste"),
-      motherTongue: requireText(args.motherTongue, "Mother tongue"),
-      motherName: requireText(args.motherName, "Mother name"),
-      fatherAadhaarNumber: requireAadhaar(
-        args.fatherAadhaarNumber,
-        "Father's Aadhaar number",
-      ),
-      motherAadhaarNumber: requireAadhaar(
-        args.motherAadhaarNumber,
-        "Mother's Aadhaar number",
-      ),
-      motherPhone: requireMobile(args.motherPhone, "Mother mobile"),
-      email,
-      residentialAddress: requireText(
-        args.residentialAddress,
-        "Residential address",
-      ),
-      previousSchoolName: requireText(
-        args.previousSchoolName,
-        "Previous school name",
-      ),
       previousSchoolOther:
         args.previousSchoolAffiliation === "other"
           ? previousSchoolOther
@@ -604,20 +645,32 @@ export const enrollMany = mutation({
     for (const student of args.students) {
       const admissionNumber = student.admissionNumber.trim();
       try {
-        const gender = parseGender(student.gender);
-        if (!gender) {
+        const gender = student.gender.trim()
+          ? parseGender(student.gender)
+          : undefined;
+        if (student.gender.trim() && !gender) {
           throw new Error("Gender must be female, male, or other");
         }
         const className = student.className.trim().toLowerCase();
         const section = student.section.trim().toLowerCase();
-        const classroom = classes.find(
-          (item) =>
-            item.name.trim().toLowerCase() === className &&
-            item.section.trim().toLowerCase() === section,
+        if (!className) {
+          throw new Error("Class is required");
+        }
+        const classMatches = classes.filter(
+          (item) => item.name.trim().toLowerCase() === className,
         );
+        const classroom = section
+          ? classMatches.find(
+              (item) => item.section.trim().toLowerCase() === section,
+            )
+          : classMatches.length === 1
+            ? classMatches[0]
+            : undefined;
         if (!classroom) {
           throw new Error(
-            `Class not found: ${student.className.trim()} ${student.section.trim()}`.trim(),
+            classMatches.length > 1 && !section
+              ? "Enter the section for this class"
+              : `Class not found: ${student.className.trim()} ${student.section.trim()}`.trim(),
           );
         }
         if (admissionNumber && seenAdmissionNumbers.has(admissionNumber)) {
@@ -636,25 +689,25 @@ export const enrollMany = mutation({
             "Admission date is required when an amount paid is entered",
           );
         }
-        const socialCategory = parseSocialCategory(student.socialCategory);
-        if (!socialCategory) {
+        const socialCategory = student.socialCategory.trim()
+          ? parseSocialCategory(student.socialCategory)
+          : undefined;
+        if (student.socialCategory.trim() && !socialCategory) {
           throw new Error("Social category must be general, obc, sc, or st");
         }
-        const previousSchoolAffiliation = parseSchoolAffiliation(
-          student.previousSchoolAffiliation,
-        );
-        if (!previousSchoolAffiliation) {
+        const previousSchoolAffiliation = student.previousSchoolAffiliation.trim()
+          ? parseSchoolAffiliation(student.previousSchoolAffiliation)
+          : undefined;
+        if (student.previousSchoolAffiliation.trim() && !previousSchoolAffiliation) {
           throw new Error(
             "Previous school affiliation must be state, cbse, icse, or other",
           );
         }
-        const transportRequired = parseTransportRequired(student.transportRequired);
-        if (transportRequired === null) {
+        const transportRequired = student.transportRequired.trim()
+          ? parseTransportRequired(student.transportRequired)
+          : undefined;
+        if (student.transportRequired.trim() && transportRequired === null) {
           throw new Error("Transport required must be yes or no");
-        }
-        const email = requireText(student.email, "Email");
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-          throw new Error("Enter a valid email");
         }
         const previousSchoolOther = student.previousSchoolOther?.trim() ?? "";
         if (previousSchoolAffiliation === "other" && !previousSchoolOther) {
@@ -664,41 +717,29 @@ export const enrollMany = mutation({
           admissionNumber,
           fullName: student.fullName,
           dateOfBirth: student.dateOfBirth,
-          gender,
+          gender: gender ?? undefined,
           classId: classroom._id,
-          guardianName: requireText(student.fatherName, "Father name"),
+          guardianName: student.fatherName,
           guardianPhone: student.fatherMobile,
           aadhaarNumber: student.aadhaarNumber,
-          placeOfBirth: requireText(student.placeOfBirth, "Place of birth"),
-          religion: requireText(student.religion, "Religion"),
-          caste: requireText(student.caste, "Caste"),
-          motherTongue: requireText(student.motherTongue, "Mother tongue"),
-          socialCategory,
-          motherName: requireText(student.motherName, "Mother name"),
-          fatherAadhaarNumber: requireAadhaar(
-            student.fatherAadhaarNumber,
-            "Father's Aadhaar number",
-          ),
-          motherAadhaarNumber: requireAadhaar(
-            student.motherAadhaarNumber,
-            "Mother's Aadhaar number",
-          ),
-          motherPhone: requireMobile(student.motherMobile, "Mother mobile"),
-          email,
-          residentialAddress: requireText(
-            student.residentialAddress,
-            "Residential address",
-          ),
-          transportRequired,
-          previousSchoolAffiliation,
+          placeOfBirth: student.placeOfBirth,
+          religion: student.religion,
+          caste: student.caste,
+          motherTongue: student.motherTongue,
+          socialCategory: socialCategory ?? undefined,
+          motherName: student.motherName,
+          fatherAadhaarNumber: student.fatherAadhaarNumber,
+          motherAadhaarNumber: student.motherAadhaarNumber,
+          motherPhone: student.motherMobile,
+          email: student.email,
+          residentialAddress: student.residentialAddress,
+          transportRequired: transportRequired ?? undefined,
+          previousSchoolAffiliation: previousSchoolAffiliation ?? undefined,
           previousSchoolOther:
             previousSchoolAffiliation === "other"
               ? previousSchoolOther
               : undefined,
-          previousSchoolName: requireText(
-            student.previousSchoolName,
-            "Previous school name",
-          ),
+          previousSchoolName: student.previousSchoolName,
           discountType: discount.discountType,
           discountValue: discount.discountValue,
           discountReason: discount.discountReason,
@@ -929,8 +970,8 @@ const profileValidator = v.object({
   studentId: v.id("students"),
   admissionNumber: v.string(),
   fullName: v.string(),
-  dateOfBirth: v.string(),
-  gender: genderValidator,
+  dateOfBirth: v.optional(v.string()),
+  gender: v.optional(genderValidator),
   placeOfBirth: v.optional(v.string()),
   religion: v.optional(v.string()),
   caste: v.optional(v.string()),
@@ -994,8 +1035,8 @@ export const profile = query({
       studentId: student._id,
       admissionNumber: student.admissionNumber,
       fullName: studentName(student),
-      dateOfBirth: student.dateOfBirth,
-      gender: student.gender,
+      ...(student.dateOfBirth ? { dateOfBirth: student.dateOfBirth } : {}),
+      ...(student.gender ? { gender: student.gender } : {}),
       placeOfBirth: student.placeOfBirth,
       religion: student.religion,
       caste: student.caste,
@@ -1038,28 +1079,28 @@ export const profile = query({
 export const updateProfile = mutation({
   args: {
     studentId: v.id("students"),
-    admissionNumber: v.string(),
+    admissionNumber: v.optional(v.string()),
     fullName: v.string(),
-    dateOfBirth: v.string(),
-    gender: genderValidator,
-    placeOfBirth: v.string(),
-    religion: v.string(),
-    caste: v.string(),
-    motherTongue: v.string(),
-    socialCategory: socialCategoryValidator,
+    dateOfBirth: v.optional(v.string()),
+    gender: v.optional(genderValidator),
+    placeOfBirth: v.optional(v.string()),
+    religion: v.optional(v.string()),
+    caste: v.optional(v.string()),
+    motherTongue: v.optional(v.string()),
+    socialCategory: v.optional(socialCategoryValidator),
     guardianName: v.string(),
-    motherName: v.string(),
+    motherName: v.optional(v.string()),
     guardianPhone: v.string(),
-    motherPhone: v.string(),
-    aadhaarNumber: v.string(),
-    fatherAadhaarNumber: v.string(),
-    motherAadhaarNumber: v.string(),
-    email: v.string(),
-    residentialAddress: v.string(),
-    transportRequired: v.boolean(),
-    previousSchoolAffiliation: schoolAffiliationValidator,
+    motherPhone: v.optional(v.string()),
+    aadhaarNumber: v.optional(v.string()),
+    fatherAadhaarNumber: v.optional(v.string()),
+    motherAadhaarNumber: v.optional(v.string()),
+    email: v.optional(v.string()),
+    residentialAddress: v.optional(v.string()),
+    transportRequired: v.optional(v.boolean()),
+    previousSchoolAffiliation: v.optional(schoolAffiliationValidator),
     previousSchoolOther: v.optional(v.string()),
-    previousSchoolName: v.string(),
+    previousSchoolName: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -1068,7 +1109,8 @@ export const updateProfile = mutation({
     if (!student) {
       throw new Error("Student not found");
     }
-    const admissionNumber = requireText(args.admissionNumber, "Admission number");
+    const admissionNumber =
+      args.admissionNumber?.trim() || student.admissionNumber;
     const existing = await ctx.db
       .query("students")
       .withIndex("by_admission_number", (q) =>
@@ -1078,13 +1120,12 @@ export const updateProfile = mutation({
     if (existing && existing._id !== student._id) {
       throw new Error("Admission number already exists");
     }
-    const dateOfBirth = parseDateOfBirth(args.dateOfBirth);
-    if (!dateOfBirth) {
+    const rawDateOfBirth = args.dateOfBirth?.trim() ?? "";
+    const dateOfBirth = rawDateOfBirth
+      ? parseDateOfBirth(rawDateOfBirth)
+      : student.dateOfBirth;
+    if (rawDateOfBirth && !dateOfBirth) {
       throw new Error("Date of birth must be YYYY-MM-DD or DD-MM-YYYY");
-    }
-    const email = requireText(args.email, "Email");
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new Error("Enter a valid email");
     }
     const previousSchoolOther = args.previousSchoolOther?.trim() ?? "";
     if (args.previousSchoolAffiliation === "other" && !previousSchoolOther) {
@@ -1093,41 +1134,67 @@ export const updateProfile = mutation({
     await ctx.db.patch("students", args.studentId, {
       admissionNumber,
       fullName: requireText(args.fullName, "Student name"),
-      dateOfBirth,
-      gender: args.gender,
-      placeOfBirth: requireText(args.placeOfBirth, "Place of birth"),
-      religion: requireText(args.religion, "Religion"),
-      caste: requireText(args.caste, "Caste"),
-      motherTongue: requireText(args.motherTongue, "Mother tongue"),
-      socialCategory: args.socialCategory,
+      ...(dateOfBirth ? { dateOfBirth } : {}),
+      ...(args.gender ? { gender: args.gender } : {}),
+      ...(optionalText(args.placeOfBirth)
+        ? { placeOfBirth: optionalText(args.placeOfBirth) }
+        : {}),
+      ...(optionalText(args.religion)
+        ? { religion: optionalText(args.religion) }
+        : {}),
+      ...(optionalText(args.caste) ? { caste: optionalText(args.caste) } : {}),
+      ...(optionalText(args.motherTongue)
+        ? { motherTongue: optionalText(args.motherTongue) }
+        : {}),
+      ...(args.socialCategory ? { socialCategory: args.socialCategory } : {}),
       guardianName: requireText(args.guardianName, "Father name"),
-      motherName: requireText(args.motherName, "Mother name"),
+      ...(optionalText(args.motherName)
+        ? { motherName: optionalText(args.motherName) }
+        : {}),
       guardianPhone: requireMobile(args.guardianPhone, "Father mobile"),
-      motherPhone: requireMobile(args.motherPhone, "Mother mobile"),
-      aadhaarNumber: requireAadhaar(args.aadhaarNumber, "Student Aadhaar number"),
-      fatherAadhaarNumber: requireAadhaar(
-        args.fatherAadhaarNumber,
-        "Father's Aadhaar number",
-      ),
-      motherAadhaarNumber: requireAadhaar(
-        args.motherAadhaarNumber,
-        "Mother's Aadhaar number",
-      ),
-      email,
-      residentialAddress: requireText(
-        args.residentialAddress,
-        "Residential address",
-      ),
-      transportRequired: args.transportRequired,
-      previousSchoolAffiliation: args.previousSchoolAffiliation,
-      previousSchoolOther:
-        args.previousSchoolAffiliation === "other"
-          ? previousSchoolOther
-          : undefined,
-      previousSchoolName: requireText(
-        args.previousSchoolName,
-        "Previous school name",
-      ),
+      ...(optionalMobile(args.motherPhone, "Mother mobile")
+        ? { motherPhone: optionalMobile(args.motherPhone, "Mother mobile") }
+        : {}),
+      ...(optionalAadhaar(args.aadhaarNumber, "Student Aadhaar number")
+        ? {
+            aadhaarNumber: optionalAadhaar(
+              args.aadhaarNumber,
+              "Student Aadhaar number",
+            ),
+          }
+        : {}),
+      ...(optionalAadhaar(args.fatherAadhaarNumber, "Father's Aadhaar number")
+        ? {
+            fatherAadhaarNumber: optionalAadhaar(
+              args.fatherAadhaarNumber,
+              "Father's Aadhaar number",
+            ),
+          }
+        : {}),
+      ...(optionalAadhaar(args.motherAadhaarNumber, "Mother's Aadhaar number")
+        ? {
+            motherAadhaarNumber: optionalAadhaar(
+              args.motherAadhaarNumber,
+              "Mother's Aadhaar number",
+            ),
+          }
+        : {}),
+      ...(optionalEmail(args.email) ? { email: optionalEmail(args.email) } : {}),
+      ...(optionalText(args.residentialAddress)
+        ? { residentialAddress: optionalText(args.residentialAddress) }
+        : {}),
+      ...(args.transportRequired !== undefined
+        ? { transportRequired: args.transportRequired }
+        : {}),
+      ...(args.previousSchoolAffiliation
+        ? { previousSchoolAffiliation: args.previousSchoolAffiliation }
+        : {}),
+      ...(args.previousSchoolAffiliation === "other"
+        ? { previousSchoolOther }
+        : {}),
+      ...(optionalText(args.previousSchoolName)
+        ? { previousSchoolName: optionalText(args.previousSchoolName) }
+        : {}),
     });
     return null;
   },

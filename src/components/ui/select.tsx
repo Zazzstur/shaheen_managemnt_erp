@@ -10,7 +10,7 @@ const SelectLabelMapContext = React.createContext<
 >(undefined)
 
 function toLabelMap(
-  items: SelectPrimitive.Root.Props["items"],
+  items: SelectPrimitive.Root.Props<string>["items"],
 ): Record<string, React.ReactNode> | undefined {
   if (!items) return undefined
   if (Array.isArray(items)) {
@@ -31,10 +31,10 @@ function toLabelMap(
   return items as Record<string, React.ReactNode>
 }
 
-function Select({
+function Select<Value, Multiple extends boolean | undefined = false>({
   items,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Root>) {
+}: SelectPrimitive.Root.Props<Value, Multiple>) {
   const labelMap = React.useMemo(() => toLabelMap(items), [items])
   return (
     <SelectLabelMapContext.Provider value={labelMap}>

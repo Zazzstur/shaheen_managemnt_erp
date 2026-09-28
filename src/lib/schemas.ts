@@ -129,7 +129,7 @@ export const teacherAccountSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters"),
 });
 
-export type EnrollStudentInput = z.infer<typeof enrollStudentSchema>;
+export type EnrollStudentInput = z.input<typeof enrollStudentSchema>;
 export type FeeInput = z.infer<typeof feeSchema>;
 
 export const extraFeeSchema = z.object({

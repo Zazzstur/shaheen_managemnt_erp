@@ -447,15 +447,15 @@ export default function ReportCardsPage() {
   if (me === undefined) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
-  if (me.role === "teacher") {
-    return <TeacherMarksEntry />;
-  }
-  if (me.role !== "super_admin") {
+  if (me === null || (me.role !== "teacher" && me.role !== "super_admin")) {
     return (
       <p className="text-sm text-muted-foreground">
         Only staff can create report cards.
       </p>
     );
+  }
+  if (me.role === "teacher") {
+    return <TeacherMarksEntry />;
   }
 
   return (

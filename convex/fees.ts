@@ -17,11 +17,16 @@ import {
   uniqueInvoiceNumber,
 } from "./lib/feeQuote";
 import {
+  academicFeeBreakdown,
+  allocatePayment,
   buildFeeAccount,
+  dueInRange,
   monthKeyFromTimestamp,
   roundMoney,
   scheduleStartYear,
 } from "./lib/feeLedger";
+
+const paymentModeValidator = v.union(v.literal("cash"), v.literal("online"));
 
 export const list = query({
   args: {
@@ -289,25 +294,43 @@ function academicMonthlyRate(
   classroom: Doc<"classes">,
   student: Doc<"students">,
 ) {
-  const tuition = classroom.baseTuitionFee ?? 0;
-  const extras = (classroom.extraFees ?? []).reduce(
-    (sum, fee) => sum + (fee.amount > 0 ? fee.amount : 0),
-    0,
-  );
-  const cycleTotal = tuition + extras;
-  const monthly =
-    classroom.tuitionCycle === "annual" ? cycleTotal / 12 : cycleTotal;
-  const value = student.discountValue ?? 0;
-  if (value <= 0 || monthly <= 0) {
-    return roundMoney(Math.max(0, monthly));
-  }
-  const discount =
-    student.discountType === "percent" ? (monthly * value) / 100 : value;
-  return roundMoney(Math.max(0, monthly - Math.min(monthly, discount)));
+  return academicFeeBreakdown({
+    baseTuitionFee: classroom.baseTuitionFee,
+    extraFees: classroom.extraFees,
+    tuitionCycle: classroom.tuitionCycle,
+    discountType: student.discountType,
+    discountValue: student.discountValue,
+  }).monthlyFee;
 }
 
 function laterMonth(left: string, right: string) {
   return left > right ? left : right;
+}
+
+function feeWindow(classroom: Doc<"classes">, asOf: string) {
+  const viewYear = Number(asOf.slice(0, 4));
+  const startYear = scheduleStartYear(classroom.academicYear, viewYear);
+  return {
+    viewYear,
+    asOfMonth: asOf.slice(0, 7),
+    fromMonth: `${startYear}-01`,
+    throughMonth: `${viewYear}-12`,
+  };
+}
+
+async function invoicePaymentsTotal(ctx: QueryCtx, studentId: Id<"students">) {
+  const invoices = await ctx.db
+    .query("fees")
+    .withIndex("by_student", (q) => q.eq("studentId", studentId))
+    .take(50);
+  return roundMoney(
+    invoices.reduce((sum, fee) => sum + (fee.paidAmount ?? 0), 0),
+  );
+}
+
+function trimmed(value: string | undefined) {
+  const text = value?.trim();
+  return text ? text : undefined;
 }
 
 async function loadFeeStatement(
@@ -324,18 +347,14 @@ async function loadFeeStatement(
     throw new Error("Class not found for this student");
   }
 
-  const viewYear = Number(asOf.slice(0, 4));
-  const asOfMonth = asOf.slice(0, 7);
-  const startYear = scheduleStartYear(classroom.academicYear, viewYear);
-  const fromMonth = `${startYear}-01`;
-  const throughMonth = `${viewYear}-12`;
+  const { viewYear, asOfMonth, fromMonth, throughMonth } = feeWindow(
+    classroom,
+    asOf,
+  );
 
-  const invoices = await ctx.db
-    .query("fees")
-    .withIndex("by_student", (q) => q.eq("studentId", student._id))
-    .take(50);
-  const academicEarlierPayments = roundMoney(
-    invoices.reduce((sum, fee) => sum + (fee.paidAmount ?? 0), 0),
+  const academicEarlierPayments = await invoicePaymentsTotal(
+    ctx,
+    student._id,
   );
 
   const payments = await ctx.db
@@ -452,6 +471,82 @@ export const searchStudents = query({
   },
 });
 
+const filterHitValidator = v.object({
+  studentId: v.id("students"),
+  studentName: v.string(),
+  admissionNumber: v.string(),
+  classLabel: v.string(),
+  totalDue: v.optional(v.number()),
+});
+
+export const filterStudents = query({
+  args: {
+    asOf: v.string(),
+    term: v.string(),
+    classId: v.optional(v.id("classes")),
+    feeStatus: v.union(v.literal("all"), v.literal("due"), v.literal("paid")),
+  },
+  returns: v.array(filterHitValidator),
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx);
+    if (!isIsoDate(args.asOf)) {
+      throw new Error("Date must be YYYY-MM-DD");
+    }
+    const term = args.term.trim().toLowerCase();
+    if (!args.classId && !term) {
+      return [];
+    }
+    const students = await enrolledStudents(ctx, args.classId);
+    const classLabels = new Map<Id<"classes">, string | null>();
+    const hits = [];
+    for (const student of students) {
+      const name = studentName(student);
+      if (
+        term &&
+        !`${name} ${student.admissionNumber}`.toLowerCase().includes(term)
+      ) {
+        continue;
+      }
+      let classLabel = classLabels.get(student.classId);
+      if (classLabel === undefined) {
+        const classroom = await ctx.db.get("classes", student.classId);
+        classLabel = classroom
+          ? `${classroom.name} ${classroom.section}`.trim()
+          : null;
+        classLabels.set(student.classId, classLabel);
+      }
+      if (classLabel === null) {
+        continue;
+      }
+      if (args.feeStatus === "all") {
+        hits.push({
+          studentId: student._id,
+          studentName: name,
+          admissionNumber: student.admissionNumber,
+          classLabel,
+        });
+        continue;
+      }
+      const statement = await loadFeeStatement(ctx, student._id, args.asOf);
+      const totalDue = roundMoney(
+        statement.academic.due + statement.transport.due,
+      );
+      if ((args.feeStatus === "due") !== totalDue > 0) {
+        continue;
+      }
+      hits.push({
+        studentId: student._id,
+        studentName: statement.studentName,
+        admissionNumber: statement.admissionNumber,
+        classLabel: statement.classLabel,
+        totalDue,
+      });
+    }
+    hits.sort((a, b) => a.studentName.localeCompare(b.studentName));
+    return hits;
+  },
+});
+
 export const statement = query({
   args: {
     studentId: v.id("students"),
@@ -511,12 +606,16 @@ export const recordSettlement = mutation({
     amount: v.number(),
     paidOn: v.string(),
     note: v.optional(v.string()),
+    mode: v.optional(paymentModeValidator),
   },
-  returns: v.null(),
+  returns: v.id("feePayments"),
   handler: async (ctx, args) => {
     await requireSuperAdmin(ctx);
     if (!isIsoDate(args.paidOn)) {
       throw new Error("Payment date must be YYYY-MM-DD");
+    }
+    if (!args.mode) {
+      throw new Error("Choose a payment mode: cash or online");
     }
     if (!Number.isFinite(args.amount) || args.amount <= 0) {
       throw new Error("Amount must be greater than 0");
@@ -538,13 +637,434 @@ export const recordSettlement = mutation({
       }
     }
     const note = args.note?.trim();
-    await ctx.db.insert("feePayments", {
+    return await ctx.db.insert("feePayments", {
       studentId: args.studentId,
       kind: args.kind,
       amount: roundMoney(args.amount),
       paidOn: args.paidOn,
       note: note ? note.slice(0, 200) : undefined,
+      mode: args.mode,
     });
+  },
+});
+
+const paymentInvoiceValidator = v.object({
+  paymentId: v.id("feePayments"),
+  kind: v.union(v.literal("academic"), v.literal("transport")),
+  paidOn: v.string(),
+  mode: v.optional(paymentModeValidator),
+  amount: v.number(),
+  studentName: v.string(),
+  admissionNumber: v.string(),
+  classLabel: v.string(),
+  session: v.string(),
+  fatherName: v.optional(v.string()),
+  fatherPhone: v.optional(v.string()),
+  motherName: v.optional(v.string()),
+  motherPhone: v.optional(v.string()),
+  dueBefore: v.number(),
+  dueAfter: v.number(),
+  advanceAfter: v.number(),
+  lines: v.array(
+    v.object({
+      month: v.string(),
+      label: v.string(),
+      charge: v.number(),
+      dueBefore: v.number(),
+      paid: v.number(),
+    }),
+  ),
+  unallocated: v.number(),
+});
+
+export const paymentInvoice = query({
+  args: { paymentId: v.id("feePayments") },
+  returns: paymentInvoiceValidator,
+  handler: async (ctx, args) => {
+    const user = await requireRoles(ctx, [
+      "super_admin",
+      "parent",
+      "student",
+    ]);
+    const payment = await ctx.db.get("feePayments", args.paymentId);
+    if (!payment) {
+      throw new Error("Payment not found");
+    }
+    const student = await assertStudentAccess(ctx, payment.studentId, user);
+    const classroom = await ctx.db.get("classes", student.classId);
+    if (!classroom) {
+      throw new Error("Class not found for this student");
+    }
+
+    const { viewYear, asOfMonth, fromMonth, throughMonth } = feeWindow(
+      classroom,
+      payment.paidOn,
+    );
+    let monthlyRate = academicMonthlyRate(classroom, student);
+    let chargeFrom = fromMonth;
+    if (payment.kind === "transport") {
+      const assignment = await ctx.db
+        .query("studentTransport")
+        .withIndex("by_student", (q) => q.eq("studentId", student._id))
+        .unique();
+      if (!assignment) {
+        throw new Error("This student is not assigned to a transport route");
+      }
+      const route = await ctx.db.get("transportRoutes", assignment.routeId);
+      monthlyRate = assignment.customFee ?? route?.defaultFee ?? 0;
+      chargeFrom = laterMonth(
+        monthKeyFromTimestamp(assignment._creationTime),
+        fromMonth,
+      );
+    }
+
+    const payments = await ctx.db
+      .query("feePayments")
+      .withIndex("by_student", (q) => q.eq("studentId", student._id))
+      .take(200);
+    let paidBefore =
+      payment.kind === "academic"
+        ? await invoicePaymentsTotal(ctx, student._id)
+        : 0;
+    for (const other of payments) {
+      if (
+        other.kind === payment.kind &&
+        other._creationTime < payment._creationTime
+      ) {
+        paidBefore = roundMoney(paidBefore + other.amount);
+      }
+    }
+
+    const accountArgs = {
+      monthlyRate,
+      fromMonth: chargeFrom,
+      throughMonth,
+      asOfMonth,
+    };
+    const before = buildFeeAccount({
+      ...accountArgs,
+      paid: paidBefore,
+      displayYear: viewYear,
+    });
+    const after = buildFeeAccount({
+      ...accountArgs,
+      paid: roundMoney(paidBefore + payment.amount),
+      displayYear: viewYear,
+    });
+    const allocation = allocatePayment({
+      monthlyRate,
+      paidBefore,
+      amount: payment.amount,
+      fromMonth: chargeFrom,
+      throughMonth,
+    });
+
+    const fatherName = trimmed(student.guardianName);
+    const fatherPhone = trimmed(student.guardianPhone);
+    const motherName = trimmed(student.motherName);
+    const motherPhone = trimmed(student.motherPhone);
+
+    return {
+      paymentId: payment._id,
+      kind: payment.kind,
+      paidOn: payment.paidOn,
+      ...(payment.mode ? { mode: payment.mode } : {}),
+      amount: payment.amount,
+      studentName: studentName(student),
+      admissionNumber: student.admissionNumber,
+      classLabel: `${classroom.name} ${classroom.section}`.trim(),
+      session: String(viewYear),
+      ...(fatherName ? { fatherName } : {}),
+      ...(fatherPhone ? { fatherPhone } : {}),
+      ...(motherName ? { motherName } : {}),
+      ...(motherPhone ? { motherPhone } : {}),
+      dueBefore: before.due,
+      dueAfter: after.due,
+      advanceAfter: after.advance,
+      lines: allocation.lines,
+      unallocated: allocation.unallocated,
+    };
+  },
+});
+
+function assertDateRange(from: string, to: string) {
+  if (!isIsoDate(from) || !isIsoDate(to)) {
+    throw new Error("Dates must be YYYY-MM-DD");
+  }
+  if (from > to) {
+    throw new Error("Start date must be on or before the end date");
+  }
+}
+
+async function enrolledStudents(
+  ctx: QueryCtx,
+  classId: Id<"classes"> | undefined,
+) {
+  const students = classId
+    ? await ctx.db
+        .query("students")
+        .withIndex("by_class", (q) => q.eq("classId", classId))
+        .take(500)
+    : await ctx.db.query("students").take(500);
+  return students.filter((student) => student.status === "enrolled");
+}
+
+export const schoolSnapshot = query({
+  args: {
+    asOf: v.string(),
+    collectionFrom: v.string(),
+    collectionTo: v.string(),
+  },
+  returns: v.object({
+    monthlyCollection: v.number(),
+    paymentCount: v.number(),
+    totalDue: v.number(),
+    studentsWithDue: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx);
+    assertDateRange(args.collectionFrom, args.collectionTo);
+    if (!isIsoDate(args.asOf)) {
+      throw new Error("Date must be YYYY-MM-DD");
+    }
+    const students = await enrolledStudents(ctx, undefined);
+    const dueFromMonth = `${args.asOf.slice(0, 4)}-01`;
+    const dueToMonth = args.asOf.slice(0, 7);
+    let monthlyCollection = 0;
+    let paymentCount = 0;
+    let totalDue = 0;
+    let studentsWithDue = 0;
+
+    for (const student of students) {
+      const statement = await loadFeeStatement(ctx, student._id, args.asOf);
+      const due = roundMoney(
+        dueInRange(statement.academic, dueFromMonth, dueToMonth) +
+          dueInRange(statement.transport, dueFromMonth, dueToMonth),
+      );
+      if (due > 0) {
+        totalDue = roundMoney(totalDue + due);
+        studentsWithDue += 1;
+      }
+      const payments = await ctx.db
+        .query("feePayments")
+        .withIndex("by_student", (q) => q.eq("studentId", student._id))
+        .take(200);
+      for (const payment of payments) {
+        if (
+          payment.paidOn >= args.collectionFrom &&
+          payment.paidOn <= args.collectionTo
+        ) {
+          monthlyCollection = roundMoney(monthlyCollection + payment.amount);
+          paymentCount += 1;
+        }
+      }
+    }
+
+    return { monthlyCollection, paymentCount, totalDue, studentsWithDue };
+  },
+});
+
+const collectionRowValidator = v.object({
+  paymentId: v.id("feePayments"),
+  paidOn: v.string(),
+  studentName: v.string(),
+  admissionNumber: v.string(),
+  classLabel: v.string(),
+  kind: v.union(v.literal("academic"), v.literal("transport")),
+  mode: v.optional(paymentModeValidator),
+  amount: v.number(),
+});
+
+export const collectionReport = query({
+  args: {
+    from: v.string(),
+    to: v.string(),
+    classId: v.optional(v.id("classes")),
+  },
+  returns: v.object({
+    total: v.number(),
+    rows: v.array(collectionRowValidator),
+  }),
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx);
+    assertDateRange(args.from, args.to);
+    const students = await enrolledStudents(ctx, args.classId);
+    const rows = [];
+    let total = 0;
+    for (const student of students) {
+      const classroom = await ctx.db.get("classes", student.classId);
+      if (!classroom) {
+        continue;
+      }
+      const payments = await ctx.db
+        .query("feePayments")
+        .withIndex("by_student", (q) => q.eq("studentId", student._id))
+        .take(200);
+      for (const payment of payments) {
+        if (payment.paidOn < args.from || payment.paidOn > args.to) {
+          continue;
+        }
+        total = roundMoney(total + payment.amount);
+        rows.push({
+          paymentId: payment._id,
+          paidOn: payment.paidOn,
+          studentName: studentName(student),
+          admissionNumber: student.admissionNumber,
+          classLabel: `${classroom.name} ${classroom.section}`.trim(),
+          kind: payment.kind,
+          ...(payment.mode ? { mode: payment.mode } : {}),
+          amount: payment.amount,
+        });
+      }
+    }
+    rows.sort((left, right) => {
+      const byDate = right.paidOn.localeCompare(left.paidOn);
+      if (byDate !== 0) {
+        return byDate;
+      }
+      return left.studentName.localeCompare(right.studentName);
+    });
+    return { total, rows };
+  },
+});
+
+const dueRowValidator = v.object({
+  studentId: v.id("students"),
+  studentName: v.string(),
+  admissionNumber: v.string(),
+  classLabel: v.string(),
+  fatherPhone: v.optional(v.string()),
+  motherPhone: v.optional(v.string()),
+  academicDue: v.number(),
+  transportDue: v.number(),
+  due: v.number(),
+});
+
+export const dueReport = query({
+  args: {
+    from: v.string(),
+    to: v.string(),
+    classId: v.optional(v.id("classes")),
+  },
+  returns: v.object({
+    totalDue: v.number(),
+    rows: v.array(dueRowValidator),
+  }),
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx);
+    assertDateRange(args.from, args.to);
+    const fromMonth = args.from.slice(0, 7);
+    const toMonth = args.to.slice(0, 7);
+    const students = await enrolledStudents(ctx, args.classId);
+    const rows = [];
+    let totalDue = 0;
+    for (const student of students) {
+      const statement = await loadFeeStatement(ctx, student._id, args.to);
+      const academicDue = dueInRange(statement.academic, fromMonth, toMonth);
+      const transportDue = dueInRange(statement.transport, fromMonth, toMonth);
+      const due = roundMoney(academicDue + transportDue);
+      if (due <= 0) {
+        continue;
+      }
+      totalDue = roundMoney(totalDue + due);
+      const fatherPhone = trimmed(student.guardianPhone);
+      const motherPhone = trimmed(student.motherPhone);
+      rows.push({
+        studentId: student._id,
+        studentName: statement.studentName,
+        admissionNumber: statement.admissionNumber,
+        classLabel: statement.classLabel,
+        ...(fatherPhone ? { fatherPhone } : {}),
+        ...(motherPhone ? { motherPhone } : {}),
+        academicDue,
+        transportDue,
+        due,
+      });
+    }
+    rows.sort(
+      (left, right) =>
+        right.due - left.due ||
+        left.studentName.localeCompare(right.studentName),
+    );
+    return { totalDue, rows };
+  },
+});
+
+const feeExportRowValidator = v.object({
+  admissionNumber: v.string(),
+  studentName: v.string(),
+  classLabel: v.string(),
+  academicMonthlyFee: v.number(),
+  academicPaid: v.number(),
+  academicDue: v.number(),
+  transportRoute: v.string(),
+  transportMonthlyFee: v.number(),
+  transportPaid: v.number(),
+  transportDue: v.number(),
+  totalPaid: v.number(),
+  totalDue: v.number(),
+});
+
+export const exportRows = query({
+  args: { asOf: v.string() },
+  returns: v.array(feeExportRowValidator),
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx);
+    if (!isIsoDate(args.asOf)) {
+      throw new Error("Date must be YYYY-MM-DD");
+    }
+    const students = await enrolledStudents(ctx, undefined);
+    const rows = [];
+    for (const student of students) {
+      const classroom = await ctx.db.get("classes", student.classId);
+      if (!classroom) {
+        continue;
+      }
+      const statement = await loadFeeStatement(ctx, student._id, args.asOf);
+      rows.push({
+        admissionNumber: statement.admissionNumber,
+        studentName: statement.studentName,
+        classLabel: statement.classLabel,
+        academicMonthlyFee: statement.academic.monthlyRate,
+        academicPaid: statement.academic.paid,
+        academicDue: statement.academic.due,
+        transportRoute: statement.transportRouteName ?? "",
+        transportMonthlyFee: statement.transport.monthlyRate,
+        transportPaid: statement.transport.paid,
+        transportDue: statement.transport.due,
+        totalPaid: roundMoney(statement.academic.paid + statement.transport.paid),
+        totalDue: roundMoney(statement.academic.due + statement.transport.due),
+      });
+    }
+    rows.sort((left, right) =>
+      left.studentName.localeCompare(right.studentName),
+    );
+    return rows;
+  },
+});
+
+export const invoiceMessage = query({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) => {
+    await requireRoles(ctx, ["super_admin"]);
+    const notice = await ctx.db.query("invoiceNotice").first();
+    return notice?.message ?? "";
+  },
+});
+
+export const setInvoiceMessage = mutation({
+  args: { message: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx);
+    const message = args.message.trim().slice(0, 500);
+    const notice = await ctx.db.query("invoiceNotice").first();
+    if (notice) {
+      await ctx.db.patch("invoiceNotice", notice._id, { message });
+    } else {
+      await ctx.db.insert("invoiceNotice", { message });
+    }
     return null;
   },
 });

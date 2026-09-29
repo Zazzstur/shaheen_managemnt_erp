@@ -20,6 +20,8 @@ export const STUDENT_CSV_HEADERS = [
   "email",
   "residential_address",
   "transport_required",
+  "route",
+  "stop",
   "previous_school_affiliation",
   "previous_school_other",
   "previous_school_name",
@@ -53,6 +55,8 @@ export type StudentCsvRow = {
   email: string;
   residentialAddress: string;
   transportRequired: string;
+  route?: string;
+  stop?: string;
   previousSchoolAffiliation: string;
   previousSchoolOther?: string;
   previousSchoolName: string;
@@ -126,6 +130,12 @@ const HEADER_ALIASES: Record<string, keyof StudentCsvRow | "row"> = {
   transport_required: "transportRequired",
   transportation_required: "transportRequired",
   school_transportation: "transportRequired",
+  route: "route",
+  transport_route: "route",
+  route_name: "route",
+  stop: "stop",
+  stop_name: "stop",
+  transport_stop: "stop",
   previous_school_affiliation: "previousSchoolAffiliation",
   previous_school_other: "previousSchoolOther",
   previous_school_name: "previousSchoolName",
@@ -249,7 +259,9 @@ export function parseStudentCsv(text: string): StudentCsvRow[] {
         key === "discountPercent" ||
         key === "description" ||
         key === "admissionDate" ||
-        key === "amountPaid"
+        key === "amountPaid" ||
+        key === "route" ||
+        key === "stop"
       ) {
         record[key] = value || undefined;
         return;
@@ -279,6 +291,8 @@ export function parseStudentCsv(text: string): StudentCsvRow[] {
       email: record.email ?? "",
       residentialAddress: record.residentialAddress ?? "",
       transportRequired: record.transportRequired ?? "",
+      route: record.route,
+      stop: record.stop,
       previousSchoolAffiliation: record.previousSchoolAffiliation ?? "",
       previousSchoolOther: record.previousSchoolOther,
       previousSchoolName: record.previousSchoolName ?? "",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "convex/react";
@@ -77,10 +77,16 @@ export default function TransportPage() {
     api.transport.listAssignmentsForRoute,
     expandedRouteId ? { routeId: expandedRouteId } : "skip",
   );
-  const students = useQuery(api.transport.listStudentRows, {
-    routeId: filterRouteId || undefined,
-    customFeeOnly: customFeeOnly || undefined,
-  });
+  const searchTerm = search.trim();
+  const isSearching = searchTerm.length > 0;
+  const students = useQuery(
+    api.transport.listStudentRows,
+    isSearching
+      ? { search: searchTerm }
+      : filterRouteId
+        ? { routeId: filterRouteId, customFeeOnly: customFeeOnly || undefined }
+        : "skip",
+  );
 
   const routeForm = useForm<TransportRouteInput>({
     resolver: zodResolver(transportRouteSchema),
@@ -91,17 +97,6 @@ export default function TransportPage() {
       defaultFee: 0,
     },
   });
-
-  const visibleStudents = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term || !students) return students;
-    return students.filter(
-      (row) =>
-        row.studentName.toLowerCase().includes(term) ||
-        row.admissionNumber.toLowerCase().includes(term) ||
-        row.classLabel.toLowerCase().includes(term),
-    );
-  }, [students, search]);
 
   if (me && me.role !== "super_admin") {
     return (
@@ -266,7 +261,7 @@ export default function TransportPage() {
                 <SelectTrigger className="w-full">
                   <span className="truncate">
                     {(routes ?? []).find((route) => route._id === filterRouteId)
-                      ?.name ?? "All routes"}
+                      ?.name ?? "No route"}
                   </span>
                 </SelectTrigger>
                 <SelectContent>
@@ -291,6 +286,7 @@ export default function TransportPage() {
             <label className="flex items-center gap-2 self-end pb-2 text-sm">
               <Checkbox
                 checked={customFeeOnly}
+                disabled={isSearching}
                 onCheckedChange={(checked) =>
                   setCustomFeeOnly(checked === true)
                 }
@@ -299,11 +295,25 @@ export default function TransportPage() {
             </label>
           </div>
 
-          {students === undefined ? (
-            <p className="text-sm text-muted-foreground">Loading students…</p>
-          ) : visibleStudents?.length === 0 ? (
+          {isSearching ? (
+            <p className="text-xs text-muted-foreground">
+              Search shows all enrolled students, including those without a
+              route. Route and custom fee filters are ignored while searching.
+            </p>
+          ) : null}
+
+          {!isSearching && !filterRouteId ? (
             <p className="text-sm text-muted-foreground">
-              No students match these filters.
+              Select a route to see students, or search by name or admission
+              number.
+            </p>
+          ) : students === undefined ? (
+            <p className="text-sm text-muted-foreground">Loading students…</p>
+          ) : students.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {isSearching
+                ? "No enrolled students match this search."
+                : "No students match these filters."}
             </p>
           ) : (
             <Table>
@@ -318,7 +328,7 @@ export default function TransportPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(visibleStudents ?? []).map((row) => (
+                {students.map((row) => (
                   <TableRow key={row.studentId}>
                     <TableCell>
                       <div className="font-medium">{row.studentName}</div>

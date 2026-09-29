@@ -1,6 +1,12 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
-import { MutationCtx, mutation, query } from "./_generated/server";
+import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
+import {
+  academicFeeBreakdown,
+  buildFeeAccount,
+  monthKeyFromTimestamp,
+  scheduleStartYear,
+} from "./lib/feeLedger";
 import { Doc, Id } from "./_generated/dataModel";
 import { uniqueInvoiceNumber } from "./lib/feeQuote";
 import { isIsoDate, requireRoles } from "./lib/auth";
@@ -505,6 +511,8 @@ const bulkStudentValidator = v.object({
   email: v.string(),
   residentialAddress: v.string(),
   transportRequired: v.string(),
+  route: v.optional(v.string()),
+  stop: v.optional(v.string()),
   previousSchoolAffiliation: v.string(),
   previousSchoolOther: v.optional(v.string()),
   previousSchoolName: v.string(),
@@ -699,6 +707,7 @@ export const enrollMany = mutation({
     }
 
     const classes = await ctx.db.query("classes").take(100);
+    const routes = await ctx.db.query("transportRoutes").take(50);
     const seenAdmissionNumbers = new Set<string>();
     const failed: Array<{
       row: number;
@@ -763,6 +772,26 @@ export const enrollMany = mutation({
         if (hasCell(student.transportRequired) && transportRequired === null) {
           throw new Error("Transport required must be yes or no");
         }
+        const routeName = cellOrUndefined(student.route);
+        const stopName = cellOrUndefined(student.stop);
+        if (stopName && !routeName) {
+          throw new Error("Enter the route for this stop");
+        }
+        if (routeName && transportRequired === false) {
+          throw new Error("Transport required is no, so leave route and stop blank");
+        }
+        const route = routeName
+          ? routes.find(
+              (item) =>
+                item.name.trim().toLowerCase() === routeName.toLowerCase(),
+            )
+          : undefined;
+        if (routeName && !route) {
+          throw new Error(`Route not found: ${routeName}`);
+        }
+        if (route && route.status !== "active") {
+          throw new Error(`Route is inactive: ${route.name}`);
+        }
         const previousSchoolOther = student.previousSchoolOther?.trim() ?? "";
         if (previousSchoolAffiliation === "other" && !previousSchoolOther) {
           throw new Error("Enter the previous school affiliation");
@@ -787,7 +816,7 @@ export const enrollMany = mutation({
           motherPhone: cellOrUndefined(student.motherMobile),
           email: cellOrUndefined(student.email),
           residentialAddress: cellOrUndefined(student.residentialAddress),
-          transportRequired: transportRequired ?? undefined,
+          transportRequired: route ? true : (transportRequired ?? undefined),
           previousSchoolAffiliation: previousSchoolAffiliation ?? undefined,
           previousSchoolOther:
             previousSchoolAffiliation === "other"
@@ -799,6 +828,13 @@ export const enrollMany = mutation({
           discountReason: discount.discountReason,
           admissionDate: admissionDate ?? undefined,
         });
+        if (route) {
+          await ctx.db.insert("studentTransport", {
+            studentId,
+            routeId: route._id,
+            ...(stopName ? { stopName } : {}),
+          });
+        }
         if (admissionDate) {
           try {
             await recordOpeningFees(
@@ -812,6 +848,13 @@ export const enrollMany = mutation({
               args.asOf,
             );
           } catch (error) {
+            const assignment = await ctx.db
+              .query("studentTransport")
+              .withIndex("by_student", (q) => q.eq("studentId", studentId))
+              .unique();
+            if (assignment) {
+              await ctx.db.delete("studentTransport", assignment._id);
+            }
             await ctx.db.delete("students", studentId);
             throw error;
           }
@@ -883,14 +926,143 @@ const directoryRowValidator = v.object({
   invoices: v.array(directoryInvoiceValidator),
 });
 
+const exportRowValidator = v.object({
+  admissionNumber: v.string(),
+  fullName: v.string(),
+  dateOfBirth: v.string(),
+  placeOfBirth: v.string(),
+  gender: v.string(),
+  religion: v.string(),
+  caste: v.string(),
+  motherTongue: v.string(),
+  socialCategory: v.string(),
+  aadhaarNumber: v.string(),
+  className: v.string(),
+  section: v.string(),
+  fatherName: v.string(),
+  motherName: v.string(),
+  fatherAadhaarNumber: v.string(),
+  motherAadhaarNumber: v.string(),
+  fatherMobile: v.string(),
+  motherMobile: v.string(),
+  email: v.string(),
+  residentialAddress: v.string(),
+  transportRequired: v.string(),
+  route: v.string(),
+  stop: v.string(),
+  previousSchoolAffiliation: v.string(),
+  previousSchoolOther: v.string(),
+  previousSchoolName: v.string(),
+  discountAmount: v.string(),
+  discountPercent: v.string(),
+  description: v.string(),
+  admissionDate: v.string(),
+  status: studentStatusValidator,
+  monthlyFee: v.number(),
+  paid: v.number(),
+  due: v.number(),
+  attendancePercent: v.union(v.number(), v.null()),
+});
+
+function filled(value: string | undefined) {
+  return value?.trim() ?? "";
+}
+
+export const exportRows = query({
+  args: { asOf: v.string() },
+  returns: v.array(exportRowValidator),
+  handler: async (ctx, args) => {
+    await requireRoles(ctx, ["super_admin"]);
+    if (!isIsoDate(args.asOf)) {
+      throw new Error("Date must be YYYY-MM-DD");
+    }
+    const students = await ctx.db.query("students").take(500);
+    const rows = [];
+    for (const student of students) {
+      const classroom = await ctx.db.get("classes", student.classId);
+      const ledger = await studentLedger(ctx, student, classroom, args.asOf);
+      const marks = await ctx.db
+        .query("attendance")
+        .withIndex("by_student", (q) => q.eq("studentId", student._id))
+        .take(120);
+      const present = marks.filter(
+        (row) => row.status === "present" || row.status === "late",
+      ).length;
+      const discountValue = student.discountValue ?? 0;
+      const assignment = await ctx.db
+        .query("studentTransport")
+        .withIndex("by_student", (q) => q.eq("studentId", student._id))
+        .unique();
+      const route = assignment
+        ? await ctx.db.get("transportRoutes", assignment.routeId)
+        : null;
+      rows.push({
+        admissionNumber: student.admissionNumber,
+        fullName: studentName(student),
+        dateOfBirth: filled(student.dateOfBirth),
+        placeOfBirth: filled(student.placeOfBirth),
+        gender: student.gender ?? "",
+        religion: filled(student.religion),
+        caste: filled(student.caste),
+        motherTongue: filled(student.motherTongue),
+        socialCategory: student.socialCategory ?? "",
+        aadhaarNumber: filled(student.aadhaarNumber),
+        className: classroom?.name ?? "",
+        section: classroom?.section ?? "",
+        fatherName: filled(student.guardianName),
+        motherName: filled(student.motherName),
+        fatherAadhaarNumber: filled(student.fatherAadhaarNumber),
+        motherAadhaarNumber: filled(student.motherAadhaarNumber),
+        fatherMobile: filled(student.guardianPhone),
+        motherMobile: filled(student.motherPhone),
+        email: filled(student.email),
+        residentialAddress: filled(student.residentialAddress),
+        transportRequired:
+          student.transportRequired === undefined
+            ? ""
+            : student.transportRequired
+              ? "yes"
+              : "no",
+        route: route?.name ?? "",
+        stop: filled(assignment?.stopName),
+        previousSchoolAffiliation: student.previousSchoolAffiliation ?? "",
+        previousSchoolOther: filled(student.previousSchoolOther),
+        previousSchoolName: filled(student.previousSchoolName),
+        discountAmount:
+          student.discountType === "amount" && discountValue > 0
+            ? String(discountValue)
+            : "",
+        discountPercent:
+          student.discountType === "percent" && discountValue > 0
+            ? String(discountValue)
+            : "",
+        description: filled(student.discountReason),
+        admissionDate: filled(student.admissionDate),
+        status: student.status,
+        monthlyFee: ledger.monthlyFee,
+        paid: ledger.paid,
+        due: ledger.due,
+        attendancePercent:
+          marks.length === 0 ? null : Math.round((present / marks.length) * 100),
+      });
+    }
+    rows.sort((left, right) => left.fullName.localeCompare(right.fullName));
+    return rows;
+  },
+});
+
 export const directory = query({
   args: {
     classId: v.optional(v.id("classes")),
     feeFilter: v.optional(directoryFeeFilter),
+    asOf: v.string(),
   },
   returns: v.array(directoryRowValidator),
   handler: async (ctx, args) => {
     await requireRoles(ctx, ["super_admin"]);
+    if (!isIsoDate(args.asOf)) {
+      throw new Error("Date must be YYYY-MM-DD");
+    }
     const students = args.classId
       ? await ctx.db
           .query("students")
@@ -908,14 +1080,9 @@ export const directory = query({
         .query("fees")
         .withIndex("by_student", (q) => q.eq("studentId", student._id))
         .take(20);
-      const billed = invoices.reduce((sum, fee) => sum + fee.amount, 0);
-      const paid = invoices.reduce(
-        (sum, fee) => sum + (fee.paidAmount ?? 0),
-        0,
-      );
-      const due = Math.max(0, billed - paid);
+      const ledger = await studentLedger(ctx, student, classroom, args.asOf);
       const feeStatus: "paid" | "due" | "none" =
-        invoices.length === 0 ? "none" : due > 0 ? "due" : "paid";
+        ledger.due > 0 ? "due" : ledger.paid > 0 ? "paid" : "none";
       const filter = args.feeFilter ?? "all";
       if (filter !== "all" && feeStatus !== filter) {
         continue;
@@ -939,9 +1106,9 @@ export const directory = query({
           ? `${classroom.name} ${classroom.section}`.trim()
           : "Unassigned",
         status: student.status,
-        billed,
-        paid,
-        due,
+        billed: ledger.billed,
+        paid: ledger.paid,
+        due: ledger.due,
         feeStatus,
         attendanceMarked,
         attendancePresent,
@@ -1049,6 +1216,9 @@ const profileValidator = v.object({
   discountType: v.optional(v.union(v.literal("percent"), v.literal("amount"))),
   discountValue: v.optional(v.number()),
   discountReason: v.optional(v.string()),
+  classMonthlyFee: v.number(),
+  monthlyFee: v.number(),
+  discountAmount: v.number(),
   billed: v.number(),
   paid: v.number(),
   due: v.number(),
@@ -1058,25 +1228,115 @@ const profileValidator = v.object({
   attendancePercent: v.union(v.number(), v.null()),
 });
 
+function laterMonth(left: string, right: string) {
+  return left > right ? left : right;
+}
+
+async function studentLedger(
+  ctx: QueryCtx,
+  student: Doc<"students">,
+  classroom: Doc<"classes"> | null,
+  asOf: string,
+) {
+  const breakdown = academicFeeBreakdown({
+    baseTuitionFee: classroom?.baseTuitionFee,
+    extraFees: classroom?.extraFees,
+    tuitionCycle: classroom?.tuitionCycle,
+    discountType: student.discountType,
+    discountValue: student.discountValue,
+  });
+  if (!classroom) {
+    return {
+      ...breakdown,
+      billed: 0,
+      paid: 0,
+      due: 0,
+    };
+  }
+
+  const viewYear = Number(asOf.slice(0, 4));
+  const startYear = scheduleStartYear(classroom.academicYear, viewYear);
+  const asOfMonth = asOf.slice(0, 7);
+  const fromMonth = `${startYear}-01`;
+  const throughMonth = `${viewYear}-12`;
+
+  const invoices = await ctx.db
+    .query("fees")
+    .withIndex("by_student", (q) => q.eq("studentId", student._id))
+    .take(50);
+  let academicPaid = roundMoney(
+    invoices.reduce((sum, fee) => sum + (fee.paidAmount ?? 0), 0),
+  );
+  let transportPaid = 0;
+  const payments = await ctx.db
+    .query("feePayments")
+    .withIndex("by_student", (q) => q.eq("studentId", student._id))
+    .take(200);
+  for (const payment of payments) {
+    if (payment.kind === "transport") {
+      transportPaid = roundMoney(transportPaid + payment.amount);
+    } else {
+      academicPaid = roundMoney(academicPaid + payment.amount);
+    }
+  }
+
+  const academic = buildFeeAccount({
+    monthlyRate: breakdown.monthlyFee,
+    paid: academicPaid,
+    fromMonth,
+    throughMonth,
+    asOfMonth,
+    displayYear: viewYear,
+  });
+
+  const assignment = await ctx.db
+    .query("studentTransport")
+    .withIndex("by_student", (q) => q.eq("studentId", student._id))
+    .unique();
+  let transportDue = 0;
+  let transportCharged = 0;
+  if (assignment) {
+    const route = await ctx.db.get("transportRoutes", assignment.routeId);
+    const transportMonthly = assignment.customFee ?? route?.defaultFee ?? 0;
+    const transport = buildFeeAccount({
+      monthlyRate: transportMonthly,
+      paid: transportPaid,
+      fromMonth: laterMonth(
+        monthKeyFromTimestamp(assignment._creationTime),
+        fromMonth,
+      ),
+      throughMonth,
+      asOfMonth,
+      displayYear: viewYear,
+    });
+    transportDue = transport.due;
+    transportCharged = transport.chargedToDate;
+  }
+
+  return {
+    ...breakdown,
+    billed: roundMoney(academic.chargedToDate + transportCharged),
+    paid: roundMoney(academicPaid + transportPaid),
+    due: roundMoney(academic.due + transportDue),
+  };
+}
+
 export const profile = query({
-  args: { studentId: v.id("students") },
+  args: { studentId: v.id("students"), asOf: v.string() },
   returns: v.union(profileValidator, v.null()),
   handler: async (ctx, args) => {
     await requireRoles(ctx, ["super_admin"]);
+    if (!isIsoDate(args.asOf)) {
+      throw new Error("Date must be YYYY-MM-DD");
+    }
     const student = await ctx.db.get("students", args.studentId);
     if (!student) {
       return null;
     }
     const classroom = await ctx.db.get("classes", student.classId);
-    const invoices = await ctx.db
-      .query("fees")
-      .withIndex("by_student", (q) => q.eq("studentId", student._id))
-      .take(20);
-    const billed = invoices.reduce((sum, fee) => sum + fee.amount, 0);
-    const paid = invoices.reduce((sum, fee) => sum + (fee.paidAmount ?? 0), 0);
-    const due = Math.max(0, billed - paid);
+    const ledger = await studentLedger(ctx, student, classroom, args.asOf);
     const feeStatus = (
-      invoices.length === 0 ? "none" : due > 0 ? "due" : "paid"
+      ledger.due > 0 ? "due" : ledger.paid > 0 ? "paid" : "none"
     ) as "paid" | "due" | "none";
     const marks = await ctx.db
       .query("attendance")
@@ -1116,9 +1376,12 @@ export const profile = query({
       discountType: student.discountType,
       discountValue: student.discountValue,
       discountReason: student.discountReason,
-      billed,
-      paid,
-      due,
+      classMonthlyFee: ledger.classMonthly,
+      monthlyFee: ledger.monthlyFee,
+      discountAmount: ledger.discountAmount,
+      billed: ledger.billed,
+      paid: ledger.paid,
+      due: ledger.due,
       feeStatus,
       attendanceMarked: marks.length,
       attendancePresent,

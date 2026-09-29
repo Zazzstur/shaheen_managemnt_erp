@@ -131,7 +131,12 @@ export default defineSchema({
     amount: v.number(),
     paidOn: v.string(),
     note: v.optional(v.string()),
+    mode: v.optional(v.union(v.literal("cash"), v.literal("online"))),
   }).index("by_student", ["studentId"]),
+
+  invoiceNotice: defineTable({
+    message: v.string(),
+  }),
 
   exams: defineTable({
     title: v.string(),

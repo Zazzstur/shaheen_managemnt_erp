@@ -61,6 +61,34 @@ function text(value: string | undefined | null) {
   return value && value.trim() ? value : "—";
 }
 
+function monthlyFeeText(profile: {
+  classMonthlyFee: number;
+  monthlyFee: number;
+  discountAmount: number;
+}) {
+  if (profile.discountAmount <= 0) {
+    return money(profile.monthlyFee);
+  }
+  return `${money(profile.monthlyFee)} (${money(profile.classMonthlyFee)}-${money(profile.discountAmount)})`;
+}
+
+function discountText(profile: {
+  discountType?: "percent" | "amount";
+  discountValue?: number;
+}) {
+  if (
+    !profile.discountType ||
+    profile.discountValue === undefined ||
+    profile.discountValue <= 0
+  ) {
+    return "—";
+  }
+  if (profile.discountType === "percent") {
+    return `${profile.discountValue}%`;
+  }
+  return money(profile.discountValue);
+}
+
 function RequiredMark() {
   return <span className="text-destructive"> *</span>;
 }
@@ -86,9 +114,15 @@ export function StudentDetailDialog({
   studentId: Id<"students"> | null;
   onOpenChange: (open: boolean) => void;
 }) {
+  const [asOf] = useState(() => {
+    const now = new Date();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${now.getFullYear()}-${month}-${day}`;
+  });
   const profile = useQuery(
     api.students.profile,
-    studentId ? { studentId } : "skip",
+    studentId ? { studentId, asOf } : "skip",
   );
   const updateProfile = useMutation(api.students.updateProfile);
   const [editing, setEditing] = useState(false);
@@ -232,13 +266,6 @@ export function StudentDetailDialog({
     }
   }
 
-  const feeLabel =
-    profile?.feeStatus === "paid"
-      ? "Paid"
-      : profile?.feeStatus === "due"
-        ? "Due"
-        : "No invoice";
-
   return (
     <Dialog open={studentId !== null} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
@@ -287,7 +314,12 @@ export function StudentDetailDialog({
         ) : editing && draft ? (
           <div className="grid gap-4 md:grid-cols-2">
             <Locked label="Class" value={profile.classLabel} />
-            <Locked label="Fee" value={feeLabel} />
+            <Locked label="Monthly fee" value={monthlyFeeText(profile)} />
+            <Locked label="Discount" value={discountText(profile)} />
+            <Locked
+              label="Discount reason"
+              value={text(profile.discountReason)}
+            />
             <Locked label="Paid" value={money(profile.paid)} />
             <Locked label="Due" value={money(profile.due)} />
             <Locked
@@ -587,7 +619,12 @@ export function StudentDetailDialog({
               label="Previous school name"
               value={text(profile.previousSchoolName)}
             />
-            <Detail label="Fee" value={feeLabel} />
+            <Detail label="Monthly fee" value={monthlyFeeText(profile)} />
+            <Detail label="Discount" value={discountText(profile)} />
+            <Detail
+              label="Discount reason"
+              value={text(profile.discountReason)}
+            />
             <Detail label="Paid" value={money(profile.paid)} />
             <Detail label="Due" value={money(profile.due)} />
             <Detail

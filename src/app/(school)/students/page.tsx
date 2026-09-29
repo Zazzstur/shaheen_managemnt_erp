@@ -1,12 +1,13 @@
 "use client";
 
 import { Fragment, useRef, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { ChevronDown, ChevronRight, Download, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { mutationResult } from "@/lib/result";
+import { downloadCsv } from "@/lib/downloadCsv";
 import { parseStudentCsv, studentCsvTemplate } from "@/lib/studentCsv";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -53,6 +54,12 @@ function feeBadge(status: "paid" | "due" | "none") {
 export default function StudentsDirectoryPage() {
   const me = useQuery(api.users.me);
   const classes = useQuery(api.catalog.listClasses);
+  const [asOf] = useState(() => {
+    const now = new Date();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${now.getFullYear()}-${month}-${day}`;
+  });
   const [classId, setClassId] = useState<Id<"classes"> | "">("");
   const [feeFilter, setFeeFilter] = useState<FeeFilter>("all");
   const [expandedId, setExpandedId] = useState<Id<"students"> | null>(null);
@@ -65,6 +72,8 @@ export default function StudentsDirectoryPage() {
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const enrollMany = useMutation(api.students.enrollMany);
+  const convex = useConvex();
+  const [downloading, setDownloading] = useState(false);
 
   const canView = me?.role === "super_admin" || me?.role === "teacher";
   const canEnroll = me?.role === "super_admin";
@@ -75,6 +84,7 @@ export default function StudentsDirectoryPage() {
       ? {
           classId,
           feeFilter,
+          asOf,
         }
       : "skip",
   );
@@ -104,6 +114,97 @@ export default function StudentsDirectoryPage() {
     link.download = "student-upload-template.csv";
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function downloadStudents() {
+    setDownloading(true);
+    try {
+      const rows = await convex.query(api.students.exportRows, { asOf });
+      downloadCsv(
+        `students-${asOf}.csv`,
+        [
+          "admission_number",
+          "full_name",
+          "date_of_birth",
+          "place_of_birth",
+          "gender",
+          "religion",
+          "caste",
+          "mother_tongue",
+          "social_category",
+          "aadhaar_number",
+          "class_name",
+          "section",
+          "father_name",
+          "mother_name",
+          "father_aadhaar_number",
+          "mother_aadhaar_number",
+          "father_mobile",
+          "mother_mobile",
+          "email",
+          "residential_address",
+          "transport_required",
+          "route",
+          "stop",
+          "previous_school_affiliation",
+          "previous_school_other",
+          "previous_school_name",
+          "discount_amount",
+          "discount_percent",
+          "description",
+          "admission_date",
+          "status",
+          "monthly_fee",
+          "paid",
+          "due",
+          "attendance_percent",
+        ],
+        rows.map((row) => [
+          row.admissionNumber,
+          row.fullName,
+          row.dateOfBirth,
+          row.placeOfBirth,
+          row.gender,
+          row.religion,
+          row.caste,
+          row.motherTongue,
+          row.socialCategory,
+          row.aadhaarNumber,
+          row.className,
+          row.section,
+          row.fatherName,
+          row.motherName,
+          row.fatherAadhaarNumber,
+          row.motherAadhaarNumber,
+          row.fatherMobile,
+          row.motherMobile,
+          row.email,
+          row.residentialAddress,
+          row.transportRequired,
+          row.route,
+          row.stop,
+          row.previousSchoolAffiliation,
+          row.previousSchoolOther,
+          row.previousSchoolName,
+          row.discountAmount,
+          row.discountPercent,
+          row.description,
+          row.admissionDate,
+          row.status,
+          row.monthlyFee.toFixed(2),
+          row.paid.toFixed(2),
+          row.due.toFixed(2),
+          row.attendancePercent ?? "",
+        ]),
+      );
+      toast.success(
+        `Downloaded ${rows.length} student${rows.length === 1 ? "" : "s"}`,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not download");
+    } finally {
+      setDownloading(false);
+    }
   }
 
   async function onUploadFile(file: File) {
@@ -139,13 +240,26 @@ export default function StudentsDirectoryPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Students</h1>
-        <p className="text-sm text-muted-foreground">
-          {isTeacher
-            ? "Student names, parent contact, and attendance."
-            : "Class, fee payments, and attendance for enrolled students."}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Students</h1>
+          <p className="text-sm text-muted-foreground">
+            {isTeacher
+              ? "Student names, parent contact, and attendance."
+              : "Class, fee payments, and attendance for enrolled students."}
+          </p>
+        </div>
+        {canEnroll ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={downloading}
+            onClick={() => void downloadStudents()}
+          >
+            <Download />
+            {downloading ? "Downloading…" : "Download CSV"}
+          </Button>
+        ) : null}
       </div>
 
       {canEnroll ? (
@@ -159,7 +273,9 @@ export default function StudentsDirectoryPage() {
               If a class name has more than one section, fill the section
               column too. Filled optional columns are still checked: social
               category is general, obc, sc, or st; affiliation is state, cbse,
-              icse, or other; transport required is yes or no; gender is
+              icse, or other; transport required is yes or no; route must
+              match a route name on the Transport page, and stop needs a
+              route; gender is
               female, male, or other. Date of birth can be YYYY-MM-DD or
               DD-MM-YYYY. Put addresses that contain commas in quotes. If an
               amount paid is entered, also enter the admission date.
@@ -169,7 +285,7 @@ export default function StudentsDirectoryPage() {
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" onClick={downloadTemplate}>
                 <Download />
-                Download CSV
+                Download template
               </Button>
               <Button
                 type="button"

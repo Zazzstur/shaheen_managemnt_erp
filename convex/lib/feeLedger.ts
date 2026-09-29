@@ -44,6 +44,58 @@ export function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
 }
 
+export function academicFeeBreakdown(args: {
+  baseTuitionFee: number | undefined;
+  extraFees: { amount: number }[] | undefined;
+  tuitionCycle: "monthly" | "annual" | undefined;
+  discountType: "percent" | "amount" | undefined;
+  discountValue: number | undefined;
+}) {
+  const tuition = args.baseTuitionFee ?? 0;
+  const extras = (args.extraFees ?? []).reduce(
+    (sum, fee) => sum + (fee.amount > 0 ? fee.amount : 0),
+    0,
+  );
+  const cycleTotal = tuition + extras;
+  const classMonthly = roundMoney(
+    Math.max(0, args.tuitionCycle === "annual" ? cycleTotal / 12 : cycleTotal),
+  );
+  const value = args.discountValue ?? 0;
+  if (value <= 0 || classMonthly <= 0) {
+    return { classMonthly, discountAmount: 0, monthlyFee: classMonthly };
+  }
+  const raw =
+    args.discountType === "percent" ? (classMonthly * value) / 100 : value;
+  const discountAmount = roundMoney(Math.min(classMonthly, Math.max(0, raw)));
+  return {
+    classMonthly,
+    discountAmount,
+    monthlyFee: roundMoney(classMonthly - discountAmount),
+  };
+}
+
+export function dueInRange(
+  account: FeeAccount,
+  fromMonth: string,
+  toMonth: string,
+) {
+  let sum = 0;
+  for (const month of account.months) {
+    if (month.month < fromMonth || month.month > toMonth) {
+      continue;
+    }
+    if (month.coverage !== "due" && month.coverage !== "partial") {
+      continue;
+    }
+    sum = roundMoney(sum + month.balance);
+  }
+  const viewYear = Number(toMonth.slice(0, 4));
+  if (Number.isFinite(viewYear) && fromMonth <= `${viewYear}-01`) {
+    sum = roundMoney(sum + account.priorDue);
+  }
+  return sum;
+}
+
 export function monthLabel(month: string) {
   const [year, rawMonth] = month.split("-");
   const index = Number(rawMonth) - 1;
@@ -156,6 +208,70 @@ export function buildFeeAccount(args: {
     priorDue: priorUnpaid,
     months,
   };
+}
+
+export type PaymentAllocationLine = {
+  month: string;
+  label: string;
+  charge: number;
+  dueBefore: number;
+  paid: number;
+};
+
+export function allocatePayment(args: {
+  monthlyRate: number;
+  paidBefore: number;
+  amount: number;
+  fromMonth: string;
+  throughMonth: string;
+}): { lines: PaymentAllocationLine[]; unallocated: number } {
+  const monthlyRate = roundMoney(Math.max(0, args.monthlyRate));
+  let before = roundMoney(Math.max(0, args.paidBefore));
+  let remaining = roundMoney(Math.max(0, args.amount));
+  const lines: PaymentAllocationLine[] = [];
+
+  const [fromYear, fromMonth] = args.fromMonth.split("-").map(Number);
+  const [throughYear, throughMonth] = args.throughMonth.split("-").map(Number);
+  if (
+    monthlyRate <= 0 ||
+    !fromYear ||
+    !fromMonth ||
+    !throughYear ||
+    !throughMonth
+  ) {
+    return { lines, unallocated: remaining };
+  }
+
+  let year = fromYear;
+  let month = fromMonth;
+  while (
+    remaining > 0 &&
+    (year < throughYear || (year === throughYear && month <= throughMonth))
+  ) {
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    const coveredBefore = roundMoney(Math.min(monthlyRate, before));
+    before = roundMoney(before - coveredBefore);
+    const dueBefore = roundMoney(monthlyRate - coveredBefore);
+    if (dueBefore > 0) {
+      const paid = roundMoney(Math.min(dueBefore, remaining));
+      remaining = roundMoney(remaining - paid);
+      lines.push({
+        month: key,
+        label: monthLabel(key),
+        charge: monthlyRate,
+        dueBefore,
+        paid,
+      });
+    }
+
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+
+  return { lines, unallocated: remaining };
 }
 
 function coverageFor(

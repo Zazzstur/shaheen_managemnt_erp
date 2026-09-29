@@ -128,3 +128,10 @@
     @apply font-sans;
   }
 }
+
+@media print {
+  body:has(.fee-invoice-sheet) > *:not(:has(.fee-invoice-sheet)),
+  body:has(.fee-invoice-sheet) [data-slot="dialog-overlay"] {
+    display: none !important;
+  }
+}

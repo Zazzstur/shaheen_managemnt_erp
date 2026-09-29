@@ -97,14 +97,24 @@ export const listStudentRows = query({
   args: {
     routeId: v.optional(v.id("transportRoutes")),
     customFeeOnly: v.optional(v.boolean()),
+    search: v.optional(v.string()),
   },
   returns: v.array(studentTransportRowValidator),
   handler: async (ctx, args) => {
     await requireRoles(ctx, ["super_admin"]);
+    const term = args.search?.trim().toLowerCase().slice(0, 100) ?? "";
     const students = await ctx.db.query("students").take(80);
     const rows = [];
     for (const student of students) {
       if (student.status !== "enrolled") {
+        continue;
+      }
+      const name = studentName(student);
+      if (
+        term &&
+        !name.toLowerCase().includes(term) &&
+        !student.admissionNumber.toLowerCase().includes(term)
+      ) {
         continue;
       }
       const classroom = await ctx.db.get("classes", student.classId);
@@ -124,7 +134,7 @@ export const listStudentRows = query({
       }
       rows.push({
         studentId: student._id,
-        studentName: studentName(student),
+        studentName: name,
         admissionNumber: student.admissionNumber,
         classLabel: classroom
           ? `${classroom.name} ${classroom.section}`.trim()

@@ -939,6 +939,10 @@ export default function FeesPage() {
   const [classId, setClassId] = useState("");
   const [feeStatus, setFeeStatus] = useState<FeeStatusFilter>("all");
   const [studentId, setStudentId] = useState<Id<"students"> | null>(null);
+  const [openHit, setOpenHit] = useState<{
+    hit: StudentHit;
+    index: number;
+  } | null>(null);
   const [downloading, setDownloading] = useState(false);
   const trimmed = term.trim();
   const isAdmin = me?.role === "super_admin";
@@ -993,6 +997,7 @@ export default function FeesPage() {
     }
     if (matches.length === 1) {
       setStudentId(matches[0].studentId);
+      setOpenHit({ hit: matches[0], index: 0 });
       return;
     }
     if (
@@ -1088,6 +1093,45 @@ export default function FeesPage() {
     );
   }
 
+  // A saved payment can move the open student out of a Due/Paid filter; keep
+  // that row in place so its collection panel and invoice dialog stay mounted.
+  let rows = matches;
+  if (
+    matches &&
+    studentId &&
+    openHit?.hit.studentId === studentId &&
+    !matches.some((match) => match.studentId === studentId)
+  ) {
+    const kept: StudentHit =
+      statement && statement.studentId === studentId && filtering
+        ? {
+            ...openHit.hit,
+            totalDue: statement.academic.due + statement.transport.due,
+          }
+        : openHit.hit;
+    rows = [...matches];
+    rows.splice(Math.min(openHit.index, rows.length), 0, kept);
+  }
+  const listVisible =
+    rows !== undefined &&
+    (rows.length > 1 || (filtering && rows.length === 1));
+  const openInList =
+    listVisible &&
+    studentId !== null &&
+    rows?.some((match) => match.studentId === studentId) === true;
+  const statementSection = studentId ? (
+    statement === undefined || statement.studentId !== studentId ? (
+      <p className="text-sm text-muted-foreground">Loading fees…</p>
+    ) : (
+      <StatementView
+        key={statement.studentId}
+        statement={statement}
+        canCollect
+        asOf={asOf}
+      />
+    )
+  ) : null;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1177,49 +1221,50 @@ export default function FeesPage() {
           {filtering ? "Loading students…" : "Searching…"}
         </p>
       ) : null}
-      {matches && matches.length === 0 ? (
+      {rows && rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {filtering
             ? "No students match these filters."
             : "No matching student."}
         </p>
       ) : null}
-      {matches && (matches.length > 1 || (filtering && matches.length === 1)) ? (
+      {listVisible && rows ? (
         <div className="flex flex-col gap-2">
           {filtering ? (
             <p className="text-sm text-muted-foreground">
-              {matches.length} student{matches.length === 1 ? "" : "s"}
+              {rows.length} student{rows.length === 1 ? "" : "s"}
             </p>
           ) : null}
-          {matches.map((match) => (
-            <button
-              key={match.studentId}
-              type="button"
-              aria-pressed={match.studentId === studentId}
-              className="rounded-lg border px-3 py-2 text-left text-sm hover:bg-muted aria-pressed:bg-muted"
-              onClick={() => setStudentId(match.studentId)}
-            >
-              <span className="font-medium">{match.studentName}</span>
-              <span className="text-muted-foreground">
-                {" "}
-                · {match.admissionNumber} · {match.classLabel}
-                {match.totalDue !== undefined
-                  ? match.totalDue > 0
-                    ? ` · Due ${money(match.totalDue)}`
-                    : " · Paid"
-                  : ""}
-              </span>
-            </button>
+          {rows.map((match, index) => (
+            <div key={match.studentId} className="flex flex-col gap-2">
+              <button
+                type="button"
+                aria-pressed={match.studentId === studentId}
+                aria-expanded={match.studentId === studentId}
+                className="rounded-lg border px-3 py-2 text-left text-sm hover:bg-muted aria-pressed:bg-muted"
+                onClick={() => {
+                  setStudentId(match.studentId);
+                  setOpenHit({ hit: match, index });
+                }}
+              >
+                <span className="font-medium">{match.studentName}</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  · {match.admissionNumber} · {match.classLabel}
+                  {match.totalDue !== undefined
+                    ? match.totalDue > 0
+                      ? ` · Due ${money(match.totalDue)}`
+                      : " · Paid"
+                    : ""}
+                </span>
+              </button>
+              {match.studentId === studentId ? statementSection : null}
+            </div>
           ))}
         </div>
       ) : null}
 
-      {studentId && statement === undefined ? (
-        <p className="text-sm text-muted-foreground">Loading fees…</p>
-      ) : null}
-      {statement ? (
-        <StatementView statement={statement} canCollect asOf={asOf} />
-      ) : null}
+      {openInList ? null : statementSection}
     </div>
   );
 }

@@ -215,17 +215,29 @@ export default function StudentsDirectoryPage() {
       const students = parseStudentCsv(text);
       const today = new Date();
       const asOf = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-      const result = await enrollMany({ students, asOf });
-      setUploadResult(result);
-      if (result.failed.length === 0) {
+      const batchSize = 100;
+      let created = 0;
+      const failed: Array<{
+        row: number;
+        admissionNumber: string;
+        message: string;
+      }> = [];
+      for (let index = 0; index < students.length; index += batchSize) {
+        const batch = students.slice(index, index + batchSize);
+        const result = await enrollMany({ students: batch, asOf });
+        created += result.created;
+        failed.push(...result.failed);
+      }
+      setUploadResult({ created, failed });
+      if (failed.length === 0) {
         toast.success(
-          `Enrolled ${result.created} student${result.created === 1 ? "" : "s"}`,
+          `Enrolled ${created} student${created === 1 ? "" : "s"}`,
         );
-      } else if (result.created === 0) {
+      } else if (created === 0) {
         toast.error("No students were enrolled. Check the row errors.");
       } else {
         toast.success(
-          `Enrolled ${result.created}. ${result.failed.length} row${result.failed.length === 1 ? "" : "s"} skipped.`,
+          `Enrolled ${created}. ${failed.length} row${failed.length === 1 ? "" : "s"} skipped.`,
         );
       }
     } catch (error) {
@@ -267,9 +279,10 @@ export default function StudentsDirectoryPage() {
           <CardHeader>
             <CardTitle>Bulk upload</CardTitle>
             <CardDescription>
-              Download the CSV template and fill one student per row. A row
-              uploads when it has an admission number, student name, class,
-              father name, and father number. Leave every other column blank.
+              Download the CSV template and fill one student per row. Files
+              larger than 100 students upload in batches. A row uploads when
+              it has an admission number, student name, class, father name,
+              and father number. Leave every other column blank.
               If a class name has more than one section, fill the section
               column too. Filled optional columns are still checked: social
               category is general, obc, sc, or st; affiliation is state, cbse,

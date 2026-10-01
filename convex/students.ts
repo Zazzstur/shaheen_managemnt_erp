@@ -1,5 +1,5 @@
 import { paginationOptsValidator } from "convex/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
 import {
   academicFeeBreakdown,
@@ -697,13 +697,13 @@ export const enrollMany = mutation({
   handler: async (ctx, args) => {
     await requireRoles(ctx, ["super_admin"]);
     if (!isIsoDate(args.asOf)) {
-      throw new Error("Upload date must be YYYY-MM-DD");
+      throw new ConvexError("Upload date must be YYYY-MM-DD");
     }
     if (args.students.length === 0) {
-      throw new Error("The CSV file has no student rows");
+      throw new ConvexError("The CSV file has no student rows");
     }
-    if (args.students.length > 100) {
-      throw new Error("Upload at most 100 students at a time");
+    if (args.students.length > 500) {
+      throw new ConvexError("Upload at most 500 students at a time");
     }
 
     const classes = await ctx.db.query("classes").take(100);

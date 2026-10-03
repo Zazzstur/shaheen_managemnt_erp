@@ -36,12 +36,15 @@ function todayIso() {
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 }
 
-function gradeFor(percent: number) {
-  if (percent >= 90) return "A";
-  if (percent >= 75) return "B";
-  if (percent >= 60) return "C";
-  if (percent >= 40) return "D";
-  return "F";
+function gradeFor(percent: number | null) {
+  if (percent === null || Number.isNaN(percent)) return "";
+  if (percent >= 90) return "A+";
+  if (percent >= 80) return "A";
+  if (percent >= 70) return "B+";
+  if (percent >= 60) return "B";
+  if (percent >= 50) return "C";
+  if (percent >= 33) return "D";
+  return "E";
 }
 
 const CATEGORIES = [
@@ -421,6 +424,11 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
 const REPORT_TABLE_CLASS =
   "border-collapse border border-[#876738] [&_td]:border [&_td]:border-[#876738]/60 [&_th]:border [&_th]:border-[#876738]/60 [&_th]:bg-[#876738]/10 [&_th]:font-semibold [&_tr]:hover:bg-transparent";
 
+const MARK_HEAD =
+  "h-auto py-1.5 text-center align-middle leading-tight";
+
+const MARK_CELL = "text-center align-middle";
+
 function dash(value: number | null) {
   return value === null ? "—" : formatMark(value);
 }
@@ -443,8 +451,9 @@ export default function ReportCardsPage() {
     const lines = (selected?.lines ?? []).filter((line) => line.total !== null);
     const obtained = lines.reduce((sum, line) => sum + (line.total ?? 0), 0);
     const maximum = lines.reduce((sum, line) => sum + line.maxMarks, 0);
-    const percent = maximum === 0 ? null : Math.round((obtained / maximum) * 100);
-    return { obtained, maximum, percent };
+    const percentExact = maximum === 0 ? null : (obtained / maximum) * 100;
+    const percent = percentExact === null ? null : Math.round(percentExact);
+    return { obtained, maximum, percent, percentExact };
   }, [selected]);
 
   if (me === undefined) {
@@ -607,12 +616,15 @@ export default function ReportCardsPage() {
                   Champaran,Bihar-845427
                 </p>
               </div>
-              <CardHeader className="flex flex-row items-start justify-between gap-3">
-                <div>
-                  <CardTitle>Report card</CardTitle>
-                  <CardDescription>
-                    {report.categoryTitle} · {report.classLabel}
-                  </CardDescription>
+              <CardHeader className="gap-2">
+                <CardTitle className="text-center !font-bold">REPORT CARD</CardTitle>
+                <div className="flex w-full items-center justify-between gap-3">
+                  <p className="text-left text-sm font-bold">
+                    {report.classLabel}
+                  </p>
+                  <p className="text-right text-sm font-bold">
+                    {report.categoryTitle}
+                  </p>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -628,11 +640,7 @@ export default function ReportCardsPage() {
                       <TableHead>Parent</TableHead>
                       <TableCell>{selected.guardianName ?? "—"}</TableCell>
                       <TableHead>Attendance</TableHead>
-                      <TableCell>
-                        {selected.attendancePercent === null
-                          ? "No records"
-                          : `${selected.attendancePercent}% (${selected.attendancePresent}/${selected.attendanceMarked} present)`}
-                      </TableCell>
+                      <TableCell />
                     </TableRow>
                   </TableBody>
                 </Table>
@@ -640,38 +648,44 @@ export default function ReportCardsPage() {
                 <Table className={`${REPORT_TABLE_CLASS} table-fixed text-xs [&_td]:whitespace-normal [&_td]:px-1.5 [&_th]:whitespace-normal [&_th]:px-1.5`}>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Subject</TableHead>
+                      <TableHead className="text-left">Subject</TableHead>
                       {report.composite ? (
                         <>
-                          <TableHead className="h-auto py-1.5 leading-tight">
-                            <span className="block">Written exam</span>
-                            <span className="block font-normal">(80)</span>
-                          </TableHead>
-                          <TableHead className="h-auto py-1.5 leading-tight">
-                            <span className="block">Notebook</span>
-                            <span className="block font-normal">(5)</span>
-                          </TableHead>
-                          <TableHead className="h-auto py-1.5 leading-tight">
-                            <span className="block">Subject enrichment</span>
-                            <span className="block font-normal">(5)</span>
-                          </TableHead>
-                          <TableHead className="h-auto py-1.5 leading-tight">
-                            <span className="block">
+                          <TableHead className={MARK_HEAD}>
+                            <span className="block text-center">
                               {category === "annual"
-                                ? "Periodic test 2"
-                                : "Periodic test 1"}
+                                ? "Periodic Test 2"
+                                : "Periodic Test 1"}
                             </span>
-                            <span className="block font-normal">(10)</span>
+                            <span className="block text-center font-normal">(10)</span>
                           </TableHead>
-                          <TableHead>Total</TableHead>
+                          <TableHead className={MARK_HEAD}>
+                            <span className="block text-center">Notebook</span>
+                            <span className="block text-center font-normal">(5)</span>
+                          </TableHead>
+                          <TableHead className={MARK_HEAD}>
+                            <span className="block text-center">Subject Enrichment</span>
+                            <span className="block text-center font-normal">(5)</span>
+                          </TableHead>
+                          <TableHead className={MARK_HEAD}>
+                            <span className="block text-center">
+                              {category === "annual"
+                                ? "Annual"
+                                : category === "half_yearly"
+                                  ? "Half Yearly"
+                                  : "Marks"}
+                            </span>
+                            <span className="block text-center font-normal">(80)</span>
+                          </TableHead>
+                          <TableHead className={MARK_HEAD}>Total</TableHead>
                         </>
                       ) : (
                         <>
-                          <TableHead>Marks</TableHead>
-                          <TableHead>Max</TableHead>
+                          <TableHead className={MARK_HEAD}>Marks</TableHead>
+                          <TableHead className={MARK_HEAD}>Max</TableHead>
                         </>
                       )}
-                      <TableHead>Grade</TableHead>
+                      <TableHead className={MARK_HEAD}>Grade</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -688,18 +702,26 @@ export default function ReportCardsPage() {
                     ) : (
                       selected.lines.map((line) => (
                         <TableRow key={line.subjectId}>
-                          <TableCell>{line.subjectName}</TableCell>
+                          <TableCell className="text-left font-bold">
+                            {line.subjectName}
+                          </TableCell>
                           {report.composite ? (
                             <>
-                              <TableCell>{dash(line.written)}</TableCell>
-                              <TableCell>{dash(line.notebook)}</TableCell>
-                              <TableCell>{dash(line.enrichment)}</TableCell>
-                              <TableCell>
+                              <TableCell className={MARK_CELL}>
                                 {line.classTestHalf === null
                                   ? "Not entered"
                                   : formatMark(line.classTestHalf)}
                               </TableCell>
-                              <TableCell>
+                              <TableCell className={MARK_CELL}>
+                                {dash(line.notebook)}
+                              </TableCell>
+                              <TableCell className={MARK_CELL}>
+                                {dash(line.enrichment)}
+                              </TableCell>
+                              <TableCell className={MARK_CELL}>
+                                {dash(line.written)}
+                              </TableCell>
+                              <TableCell className={MARK_CELL}>
                                 {line.total === null
                                   ? "—"
                                   : `${formatMark(line.total)} / 100`}
@@ -707,11 +729,13 @@ export default function ReportCardsPage() {
                             </>
                           ) : (
                             <>
-                              <TableCell>{dash(line.total)}</TableCell>
-                              <TableCell>20</TableCell>
+                              <TableCell className={MARK_CELL}>
+                                {dash(line.total)}
+                              </TableCell>
+                              <TableCell className={MARK_CELL}>20</TableCell>
                             </>
                           )}
-                          <TableCell>
+                          <TableCell className={MARK_CELL}>
                             {line.total === null || line.maxMarks === 0
                               ? "—"
                               : gradeFor((line.total / line.maxMarks) * 100)}
@@ -720,26 +744,30 @@ export default function ReportCardsPage() {
                       ))
                     )}
                     <TableRow className="font-semibold">
-                      <TableCell colSpan={markColumnCount - 2}>Total</TableCell>
-                      <TableCell colSpan={2}>
+                      <TableCell colSpan={markColumnCount - 2} className="text-left">
+                        Total
+                      </TableCell>
+                      <TableCell colSpan={2} className={MARK_CELL}>
                         {formatMark(totals.obtained)}
                         {totals.maximum > 0 ? ` / ${totals.maximum}` : ""}
                       </TableCell>
                     </TableRow>
                     <TableRow className="font-semibold">
-                      <TableCell colSpan={markColumnCount - 2}>
+                      <TableCell colSpan={markColumnCount - 2} className="text-left">
                         Percentage
                       </TableCell>
-                      <TableCell colSpan={2}>
+                      <TableCell colSpan={2} className={MARK_CELL}>
                         {totals.percent === null ? "—" : `${totals.percent}%`}
                       </TableCell>
                     </TableRow>
                     <TableRow className="font-semibold">
-                      <TableCell colSpan={markColumnCount - 2}>Grade</TableCell>
-                      <TableCell colSpan={2}>
-                        {totals.percent === null
+                      <TableCell colSpan={markColumnCount - 2} className="text-left">
+                        Grade
+                      </TableCell>
+                      <TableCell colSpan={2} className={MARK_CELL}>
+                        {totals.percentExact === null
                           ? "—"
-                          : gradeFor(totals.percent)}
+                          : gradeFor(totals.percentExact)}
                       </TableCell>
                     </TableRow>
                   </TableBody>

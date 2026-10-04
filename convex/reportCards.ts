@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { isIsoDate, requireRoles } from "./lib/auth";
 import { studentName } from "./lib/studentName";
@@ -487,52 +487,57 @@ export const saveCategoryMarks = mutation({
   handler: async (ctx, args) => {
     await requireRoles(ctx, ["teacher"]);
     if (!isIsoDate(args.date)) {
-      throw new Error("Report date must be YYYY-MM-DD");
+      throw new ConvexError("Report date must be YYYY-MM-DD");
     }
     if (args.marks.length === 0) {
-      throw new Error("Enter marks for at least one student");
+      throw new ConvexError("Enter marks for at least one student");
     }
     if (args.marks.length > 80) {
-      throw new Error("Too many students in one save");
+      throw new ConvexError("Too many students in one save");
     }
     const meta = categoryMeta[args.category];
     const classroom = await ctx.db.get("classes", args.classId);
     if (!classroom) {
-      throw new Error("Class not found");
+      throw new ConvexError("Class not found");
     }
     const subject = await ctx.db.get("subjects", args.subjectId);
     if (!subject) {
-      throw new Error("Subject not found");
+      throw new ConvexError("Subject not found");
     }
     for (const mark of args.marks) {
-      if (
-        !Number.isFinite(mark.marksObtained) ||
-        mark.marksObtained < 0 ||
-        mark.marksObtained > meta.maxMarks
-      ) {
-        throw new Error(
-          meta.composite
-            ? "Written marks must be between 0 and 80"
-            : "Marks must be between 0 and 20",
-        );
-      }
-      if (meta.composite) {
-        const notebook = mark.notebookMarks ?? 0;
-        const enrichment = mark.enrichmentMarks ?? 0;
-        if (!Number.isFinite(notebook) || notebook < 0 || notebook > 5) {
-          throw new Error("Notebook marks must be between 0 and 5");
-        }
-        if (!Number.isFinite(enrichment) || enrichment < 0 || enrichment > 5) {
-          throw new Error("Subject enrichment marks must be between 0 and 5");
-        }
-      }
       const student = await ctx.db.get("students", mark.studentId);
       if (
         !student ||
         student.classId !== args.classId ||
         student.status !== "enrolled"
       ) {
-        throw new Error("Student is not enrolled in this class");
+        throw new ConvexError("Student is not enrolled in this class");
+      }
+      const name = studentName(student);
+      if (
+        !Number.isFinite(mark.marksObtained) ||
+        mark.marksObtained < 0 ||
+        mark.marksObtained > meta.maxMarks
+      ) {
+        throw new ConvexError(
+          meta.composite
+            ? `${name}: written marks must be between 0 and 80`
+            : `${name}: marks must be between 0 and 20`,
+        );
+      }
+      if (meta.composite) {
+        const notebook = mark.notebookMarks ?? 0;
+        const enrichment = mark.enrichmentMarks ?? 0;
+        if (!Number.isFinite(notebook) || notebook < 0 || notebook > 5) {
+          throw new ConvexError(
+            `${name}: notebook marks must be between 0 and 5`,
+          );
+        }
+        if (!Number.isFinite(enrichment) || enrichment < 0 || enrichment > 5) {
+          throw new ConvexError(
+            `${name}: subject enrichment marks must be between 0 and 5`,
+          );
+        }
       }
     }
 

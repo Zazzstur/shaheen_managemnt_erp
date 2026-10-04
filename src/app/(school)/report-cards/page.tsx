@@ -60,6 +60,24 @@ function formatMark(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+function markWithinMax(value: string, max: number) {
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    return true;
+  }
+  if (!/^\d*\.?\d*$/.test(trimmed)) {
+    return false;
+  }
+  const numeric = trimmed.endsWith(".") ? trimmed.slice(0, -1) : trimmed;
+  const number = Number(numeric === "" ? "0" : numeric);
+  return Number.isFinite(number) && number >= 0 && number <= max;
+}
+
+function enteredMark(value: string | undefined) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
 function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
   const classes = useQuery(api.catalog.listClasses);
   const subjects = useQuery(api.catalog.listSubjects);
@@ -134,16 +152,38 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
         if (!writtenRaw && !notebookRaw && !enrichmentRaw) {
           continue;
         }
+        const written = Number(writtenRaw || 0);
+        const notebook = Number(notebookRaw || 0);
+        const enrichment = Number(enrichmentRaw || 0);
+        if (!Number.isFinite(written) || written < 0 || written > 80) {
+          toast.error(`${student.studentName}: written marks must be between 0 and 80`);
+          return;
+        }
+        if (!Number.isFinite(notebook) || notebook < 0 || notebook > 5) {
+          toast.error(`${student.studentName}: notebook marks must be between 0 and 5`);
+          return;
+        }
+        if (!Number.isFinite(enrichment) || enrichment < 0 || enrichment > 5) {
+          toast.error(
+            `${student.studentName}: subject enrichment marks must be between 0 and 5`,
+          );
+          return;
+        }
         marks.push({
           studentId: student.studentId,
-          marksObtained: Number(writtenRaw || 0),
-          notebookMarks: Number(notebookRaw || 0),
-          enrichmentMarks: Number(enrichmentRaw || 0),
+          marksObtained: written,
+          notebookMarks: notebook,
+          enrichmentMarks: enrichment,
         });
       } else if (writtenRaw) {
+        const written = Number(writtenRaw);
+        if (!Number.isFinite(written) || written < 0 || written > 20) {
+          toast.error(`${student.studentName}: marks must be between 0 and 20`);
+          return;
+        }
         marks.push({
           studentId: student.studentId,
-          marksObtained: Number(writtenRaw),
+          marksObtained: written,
         });
       }
     }
@@ -309,9 +349,9 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                       ? student.classTest2
                       : null;
                   const classTestPart = classTest === null ? null : classTest / 2;
-                  const written = Number(scores[student.studentId] || 0);
-                  const notebook = Number(notebooks[student.studentId] || 0);
-                  const enrichment = Number(enrichments[student.studentId] || 0);
+                  const written = enteredMark(scores[student.studentId]);
+                  const notebook = enteredMark(notebooks[student.studentId]);
+                  const enrichment = enteredMark(enrichments[student.studentId]);
                   const total =
                     written + notebook + enrichment + (classTestPart ?? 0);
                   return (
@@ -330,12 +370,16 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                               id={`written-${student.studentId}`}
                               inputMode="decimal"
                               value={scores[student.studentId] ?? ""}
-                              onChange={(event) =>
+                              onChange={(event) => {
+                                const next = event.target.value;
+                                if (!markWithinMax(next, 80)) {
+                                  return;
+                                }
                                 setScores((current) => ({
                                   ...current,
-                                  [student.studentId]: event.target.value,
-                                }))
-                              }
+                                  [student.studentId]: next,
+                                }));
+                              }}
                             />
                           </div>
                           <div className="space-y-1">
@@ -346,12 +390,16 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                               id={`notebook-${student.studentId}`}
                               inputMode="decimal"
                               value={notebooks[student.studentId] ?? ""}
-                              onChange={(event) =>
+                              onChange={(event) => {
+                                const next = event.target.value;
+                                if (!markWithinMax(next, 5)) {
+                                  return;
+                                }
                                 setNotebooks((current) => ({
                                   ...current,
-                                  [student.studentId]: event.target.value,
-                                }))
-                              }
+                                  [student.studentId]: next,
+                                }));
+                              }}
                             />
                           </div>
                           <div className="space-y-1">
@@ -362,12 +410,16 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                               id={`enrichment-${student.studentId}`}
                               inputMode="decimal"
                               value={enrichments[student.studentId] ?? ""}
-                              onChange={(event) =>
+                              onChange={(event) => {
+                                const next = event.target.value;
+                                if (!markWithinMax(next, 5)) {
+                                  return;
+                                }
                                 setEnrichments((current) => ({
                                   ...current,
-                                  [student.studentId]: event.target.value,
-                                }))
-                              }
+                                  [student.studentId]: next,
+                                }));
+                              }}
                             />
                           </div>
                           <div className="space-y-1">
@@ -392,12 +444,16 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                           placeholder="Out of 20"
                           aria-label={`${student.studentName} marks`}
                           value={scores[student.studentId] ?? ""}
-                          onChange={(event) =>
+                          onChange={(event) => {
+                            const next = event.target.value;
+                            if (!markWithinMax(next, 20)) {
+                              return;
+                            }
                             setScores((current) => ({
                               ...current,
-                              [student.studentId]: event.target.value,
-                            }))
-                          }
+                              [student.studentId]: next,
+                            }));
+                          }}
                         />
                       )}
                     </div>

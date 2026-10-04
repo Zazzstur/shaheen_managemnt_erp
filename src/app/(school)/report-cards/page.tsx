@@ -78,6 +78,10 @@ function enteredMark(value: string | undefined) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function printCategoryTitle(title: string) {
+  return title.replace(/\b1\b/g, "I").replace(/\b2\b/g, "II").toUpperCase();
+}
+
 function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
   const classes = useQuery(api.catalog.listClasses);
   const subjects = useQuery(api.catalog.listSubjects);
@@ -674,14 +678,10 @@ export default function ReportCardsPage() {
               </div>
               <CardHeader className="gap-2">
                 <CardTitle className="text-center !font-bold">REPORT CARD</CardTitle>
-                <div className="flex w-full items-center justify-between gap-3">
-                  <p className="text-left text-sm font-bold">
-                    {report.classLabel}
-                  </p>
-                  <p className="text-right text-sm font-bold">
-                    {report.categoryTitle}
-                  </p>
-                </div>
+                <p className="text-center text-sm font-bold tracking-wide">
+                  {printCategoryTitle(report.categoryTitle)}
+                </p>
+                <p className="text-left text-sm font-bold">{report.classLabel}</p>
               </CardHeader>
               <CardContent className="space-y-4">
                 <Table className={REPORT_TABLE_CLASS}>
@@ -710,8 +710,8 @@ export default function ReportCardsPage() {
                           <TableHead className={MARK_HEAD}>
                             <span className="block text-center">
                               {category === "annual"
-                                ? "Periodic Test 2"
-                                : "Periodic Test 1"}
+                                ? "Periodic Test II"
+                                : "Periodic Test I"}
                             </span>
                             <span className="block text-center font-normal">(10)</span>
                           </TableHead>

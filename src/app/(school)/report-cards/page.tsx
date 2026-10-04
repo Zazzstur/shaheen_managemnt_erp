@@ -654,9 +654,8 @@ export default function ReportCardsPage() {
           </Card>
 
           {selected ? (
-            <Card className="!gap-0 !bg-[#EBE9DC] !py-1.5 w-[210mm] max-w-[210mm] shrink-0 rounded-md border-[3px] border-[#876738] px-1.5 shadow-none ring-0! print:w-[210mm] print:max-w-[210mm] print:border-[3px] print:!bg-[#EBE9DC] print:shadow-none print:[print-color-adjust:exact]">
-              <div className="relative flex flex-col gap-4 border-[3px] border-[#876738] bg-[#EBE9DC] py-4 print:[print-color-adjust:exact]">
-              <div className="flex justify-end px-4 print:hidden">
+            <div className="flex w-[210mm] max-w-[210mm] shrink-0 flex-col gap-2">
+              <div className="flex justify-end print:hidden">
                 <Button
                   type="button"
                   variant="outline"
@@ -664,6 +663,13 @@ export default function ReportCardsPage() {
                 >
                   Print
                 </Button>
+              </div>
+            <div className="report-a4 box-border flex h-[297mm] w-[210mm] flex-col bg-[#EBE9DC] p-3 print:h-[297mm] print:w-[210mm] print:[print-color-adjust:exact]">
+              <div className="flex h-full min-h-0 flex-col border-[3px] border-[#876738] bg-[#EBE9DC] p-1.5 print:[print-color-adjust:exact]">
+              <div className="flex h-full min-h-0 flex-col gap-4 border-[3px] border-[#876738] bg-[#EBE9DC] py-3 print:[print-color-adjust:exact]">
+              <div className="flex items-start justify-between gap-3 px-3 text-[11px] leading-tight font-semibold">
+                <p>REGI NO 20410392026514145806</p>
+                <p className="shrink-0 text-right">UDISE CODE 10024103780</p>
               </div>
               <div className="flex flex-col items-center gap-1 px-2">
                 <div className="flex w-full items-center justify-center gap-2">
@@ -692,14 +698,14 @@ export default function ReportCardsPage() {
                   Champaran,Bihar-845427
                 </p>
               </div>
-              <CardHeader className="gap-1 px-2">
-                <CardTitle className="text-center text-2xl !font-bold">REPORT CARD</CardTitle>
+              <div className="flex flex-col gap-1 px-2">
+                <p className="text-center text-2xl font-bold">REPORT CARD</p>
                 <p className="text-center text-lg font-bold tracking-wide">
                   {printCategoryTitle(report.categoryTitle)}
                 </p>
                 <p className="text-left text-sm font-bold">{report.classLabel}</p>
-              </CardHeader>
-              <CardContent className="space-y-4">
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col gap-4 px-1">
                 <Table className={REPORT_TABLE_CLASS}>
                   <TableBody>
                     <TableRow>
@@ -864,7 +870,9 @@ export default function ReportCardsPage() {
                   ))}
                 </div>
 
-                <div className="grid grid-cols-3 gap-8 pt-12 pb-2">
+                <div className="min-h-4 flex-1" />
+
+                <div className="grid grid-cols-3 gap-8 pb-2">
                   {["Class teacher signature", "Parent signature", "School stamp"].map(
                     (label) => (
                       <div key={label} className="flex flex-col items-center gap-1.5">
@@ -877,9 +885,11 @@ export default function ReportCardsPage() {
                     ),
                   )}
                 </div>
-              </CardContent>
               </div>
-            </Card>
+              </div>
+              </div>
+            </div>
+            </div>
           ) : (
             <p className="text-sm text-muted-foreground print:hidden">
               Select a student to print their report card.

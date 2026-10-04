@@ -206,7 +206,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Sheet>
               <span className="font-medium">School Management</span>
             </header>
-            <main className="flex-1 p-4 md:p-8">{children}</main>
+            <main className="flex-1 p-4 md:p-8 print:p-0">{children}</main>
           </div>
         </div>
       </Authenticated>

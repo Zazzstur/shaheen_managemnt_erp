@@ -60,6 +60,10 @@ function formatMark(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+function dash(value: number | null) {
+  return value === null ? "—" : formatMark(value);
+}
+
 function markWithinMax(value: string, max: number) {
   const trimmed = value.trim();
   if (trimmed === "") {
@@ -489,10 +493,6 @@ const MARK_HEAD =
 
 const MARK_CELL = "text-center align-middle";
 
-function dash(value: number | null) {
-  return value === null ? "—" : formatMark(value);
-}
-
 export default function ReportCardsPage() {
   const me = useQuery(api.users.me);
   const classes = useQuery(api.catalog.listClasses);
@@ -532,6 +532,11 @@ export default function ReportCardsPage() {
 
   return (
     <div className="space-y-6">
+      <style>{`
+        @media print {
+          @page { size: A4 portrait; margin: 0; }
+        }
+      `}</style>
       <div className="print:hidden">
         <h1 className="text-2xl font-semibold tracking-tight">Report cards</h1>
         <p className="text-sm text-muted-foreground">
@@ -621,7 +626,7 @@ export default function ReportCardsPage() {
       </Card>
 
       {classId && category && report ? (
-        <div className="grid gap-6 lg:grid-cols-[240px_1fr]">
+        <div className="grid items-start gap-6 overflow-x-auto lg:grid-cols-[240px_210mm]">
           <Card className="print:hidden">
             <CardHeader>
               <CardTitle>Students</CardTitle>
@@ -649,36 +654,47 @@ export default function ReportCardsPage() {
           </Card>
 
           {selected ? (
-            <Card className="!gap-0 !bg-[#EBE9DC] !py-1.5 rounded-md border-[3px] border-[#876738] px-1.5 shadow-none ring-0! print:border-[3px] print:!bg-[#EBE9DC] print:shadow-none print:[print-color-adjust:exact]">
+            <Card className="!gap-0 !bg-[#EBE9DC] !py-1.5 w-[210mm] max-w-[210mm] shrink-0 rounded-md border-[3px] border-[#876738] px-1.5 shadow-none ring-0! print:w-[210mm] print:max-w-[210mm] print:border-[3px] print:!bg-[#EBE9DC] print:shadow-none print:[print-color-adjust:exact]">
               <div className="relative flex flex-col gap-4 border-[3px] border-[#876738] bg-[#EBE9DC] py-4 print:[print-color-adjust:exact]">
-              <Button
-                type="button"
-                variant="outline"
-                className="absolute top-3 right-4 print:hidden"
-                onClick={() => window.print()}
-              >
-                Print
-              </Button>
-              <div className="flex flex-col items-center gap-2 px-4 pt-1">
-                <img
-                  src="/shaheen-academy-logo.svg"
-                  alt="Shaheen Academy crest"
-                  className="h-28 w-auto"
-                />
-                <p className="text-center text-lg font-bold tracking-wide">
-                  SHAHEEN ACADEMY CHAMPARAN
-                </p>
-                <p className="-mt-1 text-center text-sm font-medium">
-                  ---Estd. 2025---
-                </p>
-                <p className="max-w-full text-center text-xs leading-snug text-balance">
+              <div className="flex justify-end px-4 print:hidden">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => window.print()}
+                >
+                  Print
+                </Button>
+              </div>
+              <div className="flex flex-col items-center gap-1 px-2">
+                <div className="flex w-full items-center justify-center gap-2">
+                  <img
+                    src="/shaheen-academy-logo.svg"
+                    alt="Shaheen Academy crest"
+                    className="h-24 w-auto shrink-0"
+                  />
+                  <div className="flex flex-col items-center">
+                    <p className="text-center text-2xl font-bold tracking-wide">
+                      SHAHEEN ACADEMY CHAMPARAN
+                    </p>
+                    <p className="text-center text-base font-medium">
+                      ---Estd. 2025---
+                    </p>
+                  </div>
+                  <img
+                    src="/shaheen-academy-logo.svg"
+                    alt=""
+                    aria-hidden="true"
+                    className="h-24 w-auto shrink-0"
+                  />
+                </div>
+                <p className="max-w-full text-center text-sm leading-snug text-balance">
                   Shaheen Chowk Murli,Post. Pachpakari,P.S. Dhaka,Distt. East
                   Champaran,Bihar-845427
                 </p>
               </div>
-              <CardHeader className="gap-2">
-                <CardTitle className="text-center !font-bold">REPORT CARD</CardTitle>
-                <p className="text-center text-sm font-bold tracking-wide">
+              <CardHeader className="gap-1 px-2">
+                <CardTitle className="text-center text-2xl !font-bold">REPORT CARD</CardTitle>
+                <p className="text-center text-lg font-bold tracking-wide">
                   {printCategoryTitle(report.categoryTitle)}
                 </p>
                 <p className="text-left text-sm font-bold">{report.classLabel}</p>

@@ -701,8 +701,9 @@ export default function ReportCardsPage() {
               <div className="flex flex-col gap-1 px-6">
                 <p className="text-center text-2xl font-bold">REPORT CARD</p>
                 <p className="text-center text-lg font-bold tracking-wide">
-                  {printCategoryTitle(report.categoryTitle)}
+                  {printCategoryTitle(report.categoryTitle)} EXAMINATION
                 </p>
+                <p className="text-center text-lg font-bold tracking-wide">2026-2027</p>
                 <p className="text-left text-sm font-bold">{report.classLabel}</p>
               </div>
               <div className="flex min-h-0 flex-1 flex-col gap-4 px-6">

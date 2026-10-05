@@ -710,13 +710,13 @@ export default function ReportCardsPage() {
                 <Table className={REPORT_TABLE_CLASS}>
                   <TableBody>
                     <TableRow>
-                      <TableHead>Student</TableHead>
+                      <TableHead>Student name</TableHead>
                       <TableCell>{selected.studentName}</TableCell>
-                      <TableHead>Admission</TableHead>
+                      <TableHead>Reg. no.</TableHead>
                       <TableCell>{selected.admissionNumber}</TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableHead>Parent</TableHead>
+                      <TableHead>Parent name</TableHead>
                       <TableCell>{selected.guardianName ?? "—"}</TableCell>
                       <TableHead>Attendance</TableHead>
                       <TableCell />

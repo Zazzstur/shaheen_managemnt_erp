@@ -664,7 +664,7 @@ export default function ReportCardsPage() {
                   Print
                 </Button>
               </div>
-            <div className="report-a4 box-border flex h-[297mm] w-[210mm] flex-col bg-[#EBE9DC] p-3 print:h-[297mm] print:w-[210mm] print:[print-color-adjust:exact]">
+            <div className="report-a4 box-border flex h-[297mm] w-[210mm] flex-col bg-[#EBE9DC] px-3 pt-3 pb-8 print:h-[297mm] print:w-[210mm] print:[print-color-adjust:exact]">
               <div className="flex h-full min-h-0 flex-col border-[3px] border-[#876738] bg-[#EBE9DC] p-1.5 print:[print-color-adjust:exact]">
               <div className="flex h-full min-h-0 flex-col gap-4 border-[3px] border-[#876738] bg-[#EBE9DC] py-3 print:[print-color-adjust:exact]">
               <div className="flex items-start justify-between gap-3 px-3 text-[11px] leading-tight font-semibold">
@@ -698,14 +698,14 @@ export default function ReportCardsPage() {
                   Champaran,Bihar-845427
                 </p>
               </div>
-              <div className="flex flex-col gap-1 px-2">
+              <div className="flex flex-col gap-1 px-6">
                 <p className="text-center text-2xl font-bold">REPORT CARD</p>
                 <p className="text-center text-lg font-bold tracking-wide">
                   {printCategoryTitle(report.categoryTitle)}
                 </p>
                 <p className="text-left text-sm font-bold">{report.classLabel}</p>
               </div>
-              <div className="flex min-h-0 flex-1 flex-col gap-4 px-1">
+              <div className="flex min-h-0 flex-1 flex-col gap-4 px-6">
                 <Table className={REPORT_TABLE_CLASS}>
                   <TableBody>
                     <TableRow>

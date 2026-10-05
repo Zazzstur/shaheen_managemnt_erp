@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { FunctionReturnType } from "convex/server";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
@@ -493,6 +494,268 @@ const MARK_HEAD =
 
 const MARK_CELL = "text-center align-middle";
 
+type PrintableReport = FunctionReturnType<typeof api.reportCards.printableReport>;
+type ReportStudent = PrintableReport["students"][number];
+
+function studentTotals(lines: ReportStudent["lines"]) {
+  const scored = lines.filter((line) => line.total !== null);
+  const obtained = scored.reduce((sum, line) => sum + (line.total ?? 0), 0);
+  const maximum = scored.reduce((sum, line) => sum + line.maxMarks, 0);
+  const percentExact = maximum === 0 ? null : (obtained / maximum) * 100;
+  const percent = percentExact === null ? null : Math.round(percentExact);
+  return { obtained, maximum, percent, percentExact };
+}
+
+function ReportCardSheet({
+  student,
+  classLabel,
+  categoryTitle,
+  composite,
+  category,
+  className,
+}: {
+  student: ReportStudent;
+  classLabel: string;
+  categoryTitle: string;
+  composite: boolean;
+  category: ReportCategory;
+  className?: string;
+}) {
+  const totals = studentTotals(student.lines);
+  const markColumnCount = composite ? 7 : 4;
+
+  return (
+    <div
+      className={`report-a4 box-border flex h-[297mm] w-[210mm] flex-col bg-[#EBE9DC] px-3 pt-3 pb-8 print:h-[297mm] print:w-[210mm] print:[print-color-adjust:exact] ${className ?? ""}`}
+    >
+      <div className="flex h-full min-h-0 flex-col border-[3px] border-[#876738] bg-[#EBE9DC] p-1.5 print:[print-color-adjust:exact]">
+        <div className="flex h-full min-h-0 flex-col gap-4 border-[3px] border-[#876738] bg-[#EBE9DC] py-3 print:[print-color-adjust:exact]">
+          <div className="flex items-start justify-between gap-3 px-3 text-[11px] leading-tight font-semibold">
+            <p>REGI NO 20410392026514145806</p>
+            <p className="shrink-0 text-right">UDISE CODE 10024103780</p>
+          </div>
+          <div className="flex flex-col items-center gap-1 px-2">
+            <div className="flex w-full items-center justify-center gap-2">
+              <img
+                src="/shaheen-academy-logo.svg"
+                alt="Shaheen Academy crest"
+                className="h-24 w-auto shrink-0"
+              />
+              <div className="flex flex-col items-center">
+                <p className="text-center text-2xl font-bold tracking-wide">
+                  SHAHEEN ACADEMY CHAMPARAN
+                </p>
+                <p className="text-center text-base font-medium">
+                  ---Estd. 2025---
+                </p>
+              </div>
+              <img
+                src="/shaheen-academy-logo.svg"
+                alt=""
+                aria-hidden="true"
+                className="h-24 w-auto shrink-0"
+              />
+            </div>
+            <p className="max-w-full text-center text-sm leading-snug text-balance">
+              Shaheen Chowk Murli,Post. Pachpakari,P.S. Dhaka,Distt. East
+              Champaran,Bihar-845427
+            </p>
+          </div>
+          <div className="flex flex-col gap-1 px-6">
+            <p className="text-center text-2xl font-bold">REPORT CARD</p>
+            <p className="text-center text-lg font-bold tracking-wide">
+              {printCategoryTitle(categoryTitle)} EXAMINATION
+            </p>
+            <p className="text-center text-lg font-bold tracking-wide">2026-2027</p>
+            <p className="text-left text-sm font-bold">{classLabel}</p>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col gap-4 px-6">
+            <Table className={REPORT_TABLE_CLASS}>
+              <TableBody>
+                <TableRow>
+                  <TableHead>Student name</TableHead>
+                  <TableCell>{student.studentName}</TableCell>
+                  <TableHead>Reg. no.</TableHead>
+                  <TableCell>{student.admissionNumber}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableHead>Parent name</TableHead>
+                  <TableCell>{student.guardianName ?? "—"}</TableCell>
+                  <TableHead>Attendance</TableHead>
+                  <TableCell />
+                </TableRow>
+              </TableBody>
+            </Table>
+
+            <Table className={`${REPORT_TABLE_CLASS} table-fixed text-xs [&_td]:whitespace-normal [&_td]:px-1.5 [&_th]:whitespace-normal [&_th]:px-1.5`}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-left">Subject</TableHead>
+                  {composite ? (
+                    <>
+                      <TableHead className={MARK_HEAD}>
+                        <span className="block text-center">
+                          {category === "annual"
+                            ? "Periodic Test II"
+                            : "Periodic Test I"}
+                        </span>
+                        <span className="block text-center font-normal">(10)</span>
+                      </TableHead>
+                      <TableHead className={MARK_HEAD}>
+                        <span className="block text-center">Notebook</span>
+                        <span className="block text-center font-normal">(5)</span>
+                      </TableHead>
+                      <TableHead className={MARK_HEAD}>
+                        <span className="block text-center">Subject Enrichment</span>
+                        <span className="block text-center font-normal">(5)</span>
+                      </TableHead>
+                      <TableHead className={MARK_HEAD}>
+                        <span className="block text-center">
+                          {category === "annual"
+                            ? "Annual"
+                            : category === "half_yearly"
+                              ? "Half Yearly"
+                              : "Marks"}
+                        </span>
+                        <span className="block text-center font-normal">(80)</span>
+                      </TableHead>
+                      <TableHead className={MARK_HEAD}>Total</TableHead>
+                    </>
+                  ) : (
+                    <>
+                      <TableHead className={MARK_HEAD}>Marks</TableHead>
+                      <TableHead className={MARK_HEAD}>Max</TableHead>
+                    </>
+                  )}
+                  <TableHead className={MARK_HEAD}>Grade</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {student.lines.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={markColumnCount}
+                      className="text-muted-foreground"
+                    >
+                      No marks yet. Teachers enter these from their report
+                      card page.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  student.lines.map((line) => (
+                    <TableRow key={line.subjectId}>
+                      <TableCell className="text-left font-bold">
+                        {line.subjectName}
+                      </TableCell>
+                      {composite ? (
+                        <>
+                          <TableCell className={MARK_CELL}>
+                            {line.classTestHalf === null
+                              ? "Not entered"
+                              : formatMark(line.classTestHalf)}
+                          </TableCell>
+                          <TableCell className={MARK_CELL}>
+                            {dash(line.notebook)}
+                          </TableCell>
+                          <TableCell className={MARK_CELL}>
+                            {dash(line.enrichment)}
+                          </TableCell>
+                          <TableCell className={MARK_CELL}>
+                            {dash(line.written)}
+                          </TableCell>
+                          <TableCell className={MARK_CELL}>
+                            {line.total === null
+                              ? "—"
+                              : `${formatMark(line.total)} / 100`}
+                          </TableCell>
+                        </>
+                      ) : (
+                        <>
+                          <TableCell className={MARK_CELL}>
+                            {dash(line.total)}
+                          </TableCell>
+                          <TableCell className={MARK_CELL}>20</TableCell>
+                        </>
+                      )}
+                      <TableCell className={MARK_CELL}>
+                        {line.total === null || line.maxMarks === 0
+                          ? "—"
+                          : gradeFor((line.total / line.maxMarks) * 100)}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+                <TableRow className="font-semibold">
+                  <TableCell colSpan={markColumnCount - 2} className="text-left">
+                    Total
+                  </TableCell>
+                  <TableCell colSpan={2} className={MARK_CELL}>
+                    {formatMark(totals.obtained)}
+                    {totals.maximum > 0 ? ` / ${totals.maximum}` : ""}
+                  </TableCell>
+                </TableRow>
+                <TableRow className="font-semibold">
+                  <TableCell colSpan={markColumnCount - 2} className="text-left">
+                    Percentage
+                  </TableCell>
+                  <TableCell colSpan={2} className={MARK_CELL}>
+                    {totals.percent === null ? "—" : `${totals.percent}%`}
+                  </TableCell>
+                </TableRow>
+                <TableRow className="font-semibold">
+                  <TableCell colSpan={markColumnCount - 2} className="text-left">
+                    Grade
+                  </TableCell>
+                  <TableCell colSpan={2} className={MARK_CELL}>
+                    {totals.percentExact === null
+                      ? "—"
+                      : gradeFor(totals.percentExact)}
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+
+            <div className="pt-2">
+              <div className="flex h-6 items-end gap-2">
+                <span className="text-sm leading-none font-semibold">
+                  Remark:
+                </span>
+                <div
+                  aria-hidden="true"
+                  className="flex-1 border-b-2 border-[#876738]"
+                />
+              </div>
+              {[0, 1].map((line) => (
+                <div
+                  key={line}
+                  aria-hidden="true"
+                  className="h-6 border-b-2 border-[#876738]"
+                />
+              ))}
+            </div>
+
+            <div className="min-h-4 flex-1" />
+
+            <div className="grid grid-cols-3 gap-8 pb-2">
+              {["Class teacher signature", "Parent signature", "School stamp"].map(
+                (label) => (
+                  <div key={label} className="flex flex-col items-center gap-1.5">
+                    <div
+                      aria-hidden="true"
+                      className="w-full max-w-40 border-b border-[#876738]"
+                    />
+                    <p className="text-center text-xs">{label}</p>
+                  </div>
+                ),
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ReportCardsPage() {
   const me = useQuery(api.users.me);
   const classes = useQuery(api.catalog.listClasses);
@@ -506,15 +769,25 @@ export default function ReportCardsPage() {
   );
 
   const selected = report?.students.find((student) => student.studentId === studentId);
-  const markColumnCount = report?.composite ? 7 : 4;
-  const totals = useMemo(() => {
-    const lines = (selected?.lines ?? []).filter((line) => line.total !== null);
-    const obtained = lines.reduce((sum, line) => sum + (line.total ?? 0), 0);
-    const maximum = lines.reduce((sum, line) => sum + line.maxMarks, 0);
-    const percentExact = maximum === 0 ? null : (obtained / maximum) * 100;
-    const percent = percentExact === null ? null : Math.round(percentExact);
-    return { obtained, maximum, percent, percentExact };
-  }, [selected]);
+  const printRootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function resetPrintScope() {
+      if (printRootRef.current) {
+        printRootRef.current.dataset.printScope = "one";
+      }
+    }
+    window.addEventListener("afterprint", resetPrintScope);
+    return () => window.removeEventListener("afterprint", resetPrintScope);
+  }, []);
+
+  function printReport(scope: "one" | "all") {
+    const root = printRootRef.current;
+    if (root) {
+      root.dataset.printScope = scope;
+    }
+    window.print();
+  }
 
   if (me === undefined) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -530,11 +803,33 @@ export default function ReportCardsPage() {
     return <TeacherMarksEntry />;
   }
 
+  const sheetProps =
+    report && category
+      ? {
+          classLabel: report.classLabel,
+          categoryTitle: report.categoryTitle,
+          composite: report.composite,
+          category,
+        }
+      : null;
+
   return (
-    <div className="space-y-6">
+    <div
+      ref={printRootRef}
+      data-print-scope="one"
+      className="report-cards-page space-y-6"
+    >
       <style>{`
+        .print-all-sheets { display: none; }
         @media print {
           @page { size: A4 portrait; margin: 0; }
+          .report-cards-page > * + * { margin-top: 0 !important; }
+          [data-print-scope="all"] .report-screen-layout { display: none !important; }
+          [data-print-scope="all"] .print-all-sheets { display: block !important; }
+          .print-all-sheets .print-all-page + .print-all-page {
+            break-before: page;
+            page-break-before: always;
+          }
         }
       `}</style>
       <div className="print:hidden">
@@ -625,8 +920,9 @@ export default function ReportCardsPage() {
         </CardContent>
       </Card>
 
-      {classId && category && report ? (
-        <div className="grid items-start gap-6 overflow-x-auto lg:grid-cols-[240px_210mm]">
+      {classId && category && report && sheetProps ? (
+        <>
+        <div className="report-screen-layout grid items-start gap-6 overflow-x-auto lg:grid-cols-[240px_210mm]">
           <Card className="print:hidden">
             <CardHeader>
               <CardTitle>Students</CardTitle>
@@ -653,243 +949,37 @@ export default function ReportCardsPage() {
             </CardContent>
           </Card>
 
-          {selected ? (
+          {report.students.length > 0 ? (
             <div className="flex w-[210mm] max-w-[210mm] shrink-0 flex-col gap-2">
-              <div className="flex justify-end print:hidden">
+              <div className="flex justify-end gap-2 print:hidden">
+                {selected ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => printReport("one")}
+                  >
+                    Print
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => window.print()}
+                  onClick={() => printReport("all")}
                 >
-                  Print
+                  Print all
                 </Button>
               </div>
-            <div className="report-a4 box-border flex h-[297mm] w-[210mm] flex-col bg-[#EBE9DC] px-3 pt-3 pb-8 print:h-[297mm] print:w-[210mm] print:[print-color-adjust:exact]">
-              <div className="flex h-full min-h-0 flex-col border-[3px] border-[#876738] bg-[#EBE9DC] p-1.5 print:[print-color-adjust:exact]">
-              <div className="flex h-full min-h-0 flex-col gap-4 border-[3px] border-[#876738] bg-[#EBE9DC] py-3 print:[print-color-adjust:exact]">
-              <div className="flex items-start justify-between gap-3 px-3 text-[11px] leading-tight font-semibold">
-                <p>REGI NO 20410392026514145806</p>
-                <p className="shrink-0 text-right">UDISE CODE 10024103780</p>
-              </div>
-              <div className="flex flex-col items-center gap-1 px-2">
-                <div className="flex w-full items-center justify-center gap-2">
-                  <img
-                    src="/shaheen-academy-logo.svg"
-                    alt="Shaheen Academy crest"
-                    className="h-24 w-auto shrink-0"
-                  />
-                  <div className="flex flex-col items-center">
-                    <p className="text-center text-2xl font-bold tracking-wide">
-                      SHAHEEN ACADEMY CHAMPARAN
-                    </p>
-                    <p className="text-center text-base font-medium">
-                      ---Estd. 2025---
-                    </p>
-                  </div>
-                  <img
-                    src="/shaheen-academy-logo.svg"
-                    alt=""
-                    aria-hidden="true"
-                    className="h-24 w-auto shrink-0"
-                  />
-                </div>
-                <p className="max-w-full text-center text-sm leading-snug text-balance">
-                  Shaheen Chowk Murli,Post. Pachpakari,P.S. Dhaka,Distt. East
-                  Champaran,Bihar-845427
+              {selected ? (
+                <ReportCardSheet
+                  {...sheetProps}
+                  student={selected}
+                  className="print-one-sheet"
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground print:hidden">
+                  Select a student to print their report card.
                 </p>
-              </div>
-              <div className="flex flex-col gap-1 px-6">
-                <p className="text-center text-2xl font-bold">REPORT CARD</p>
-                <p className="text-center text-lg font-bold tracking-wide">
-                  {printCategoryTitle(report.categoryTitle)} EXAMINATION
-                </p>
-                <p className="text-center text-lg font-bold tracking-wide">2026-2027</p>
-                <p className="text-left text-sm font-bold">{report.classLabel}</p>
-              </div>
-              <div className="flex min-h-0 flex-1 flex-col gap-4 px-6">
-                <Table className={REPORT_TABLE_CLASS}>
-                  <TableBody>
-                    <TableRow>
-                      <TableHead>Student name</TableHead>
-                      <TableCell>{selected.studentName}</TableCell>
-                      <TableHead>Reg. no.</TableHead>
-                      <TableCell>{selected.admissionNumber}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableHead>Parent name</TableHead>
-                      <TableCell>{selected.guardianName ?? "—"}</TableCell>
-                      <TableHead>Attendance</TableHead>
-                      <TableCell />
-                    </TableRow>
-                  </TableBody>
-                </Table>
-
-                <Table className={`${REPORT_TABLE_CLASS} table-fixed text-xs [&_td]:whitespace-normal [&_td]:px-1.5 [&_th]:whitespace-normal [&_th]:px-1.5`}>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="text-left">Subject</TableHead>
-                      {report.composite ? (
-                        <>
-                          <TableHead className={MARK_HEAD}>
-                            <span className="block text-center">
-                              {category === "annual"
-                                ? "Periodic Test II"
-                                : "Periodic Test I"}
-                            </span>
-                            <span className="block text-center font-normal">(10)</span>
-                          </TableHead>
-                          <TableHead className={MARK_HEAD}>
-                            <span className="block text-center">Notebook</span>
-                            <span className="block text-center font-normal">(5)</span>
-                          </TableHead>
-                          <TableHead className={MARK_HEAD}>
-                            <span className="block text-center">Subject Enrichment</span>
-                            <span className="block text-center font-normal">(5)</span>
-                          </TableHead>
-                          <TableHead className={MARK_HEAD}>
-                            <span className="block text-center">
-                              {category === "annual"
-                                ? "Annual"
-                                : category === "half_yearly"
-                                  ? "Half Yearly"
-                                  : "Marks"}
-                            </span>
-                            <span className="block text-center font-normal">(80)</span>
-                          </TableHead>
-                          <TableHead className={MARK_HEAD}>Total</TableHead>
-                        </>
-                      ) : (
-                        <>
-                          <TableHead className={MARK_HEAD}>Marks</TableHead>
-                          <TableHead className={MARK_HEAD}>Max</TableHead>
-                        </>
-                      )}
-                      <TableHead className={MARK_HEAD}>Grade</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {selected.lines.length === 0 ? (
-                      <TableRow>
-                        <TableCell
-                          colSpan={markColumnCount}
-                          className="text-muted-foreground"
-                        >
-                          No marks yet. Teachers enter these from their report
-                          card page.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      selected.lines.map((line) => (
-                        <TableRow key={line.subjectId}>
-                          <TableCell className="text-left font-bold">
-                            {line.subjectName}
-                          </TableCell>
-                          {report.composite ? (
-                            <>
-                              <TableCell className={MARK_CELL}>
-                                {line.classTestHalf === null
-                                  ? "Not entered"
-                                  : formatMark(line.classTestHalf)}
-                              </TableCell>
-                              <TableCell className={MARK_CELL}>
-                                {dash(line.notebook)}
-                              </TableCell>
-                              <TableCell className={MARK_CELL}>
-                                {dash(line.enrichment)}
-                              </TableCell>
-                              <TableCell className={MARK_CELL}>
-                                {dash(line.written)}
-                              </TableCell>
-                              <TableCell className={MARK_CELL}>
-                                {line.total === null
-                                  ? "—"
-                                  : `${formatMark(line.total)} / 100`}
-                              </TableCell>
-                            </>
-                          ) : (
-                            <>
-                              <TableCell className={MARK_CELL}>
-                                {dash(line.total)}
-                              </TableCell>
-                              <TableCell className={MARK_CELL}>20</TableCell>
-                            </>
-                          )}
-                          <TableCell className={MARK_CELL}>
-                            {line.total === null || line.maxMarks === 0
-                              ? "—"
-                              : gradeFor((line.total / line.maxMarks) * 100)}
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                    <TableRow className="font-semibold">
-                      <TableCell colSpan={markColumnCount - 2} className="text-left">
-                        Total
-                      </TableCell>
-                      <TableCell colSpan={2} className={MARK_CELL}>
-                        {formatMark(totals.obtained)}
-                        {totals.maximum > 0 ? ` / ${totals.maximum}` : ""}
-                      </TableCell>
-                    </TableRow>
-                    <TableRow className="font-semibold">
-                      <TableCell colSpan={markColumnCount - 2} className="text-left">
-                        Percentage
-                      </TableCell>
-                      <TableCell colSpan={2} className={MARK_CELL}>
-                        {totals.percent === null ? "—" : `${totals.percent}%`}
-                      </TableCell>
-                    </TableRow>
-                    <TableRow className="font-semibold">
-                      <TableCell colSpan={markColumnCount - 2} className="text-left">
-                        Grade
-                      </TableCell>
-                      <TableCell colSpan={2} className={MARK_CELL}>
-                        {totals.percentExact === null
-                          ? "—"
-                          : gradeFor(totals.percentExact)}
-                      </TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-
-                <div className="pt-2">
-                  <div className="flex h-6 items-end gap-2">
-                    <span className="text-sm leading-none font-semibold">
-                      Remark:
-                    </span>
-                    <div
-                      aria-hidden="true"
-                      className="flex-1 border-b-2 border-[#876738]"
-                    />
-                  </div>
-                  {[0, 1].map((line) => (
-                    <div
-                      key={line}
-                      aria-hidden="true"
-                      className="h-6 border-b-2 border-[#876738]"
-                    />
-                  ))}
-                </div>
-
-                <div className="min-h-4 flex-1" />
-
-                <div className="grid grid-cols-3 gap-8 pb-2">
-                  {["Class teacher signature", "Parent signature", "School stamp"].map(
-                    (label) => (
-                      <div key={label} className="flex flex-col items-center gap-1.5">
-                        <div
-                          aria-hidden="true"
-                          className="w-full max-w-40 border-b border-[#876738]"
-                        />
-                        <p className="text-center text-xs">{label}</p>
-                      </div>
-                    ),
-                  )}
-                </div>
-              </div>
-              </div>
-              </div>
-            </div>
+              )}
             </div>
           ) : (
             <p className="text-sm text-muted-foreground print:hidden">
@@ -897,6 +987,16 @@ export default function ReportCardsPage() {
             </p>
           )}
         </div>
+        {report.students.length > 0 ? (
+          <div className="print-all-sheets" aria-hidden="true">
+            {report.students.map((student) => (
+              <div key={student.studentId} className="print-all-page">
+                <ReportCardSheet {...sheetProps} student={student} />
+              </div>
+            ))}
+          </div>
+        ) : null}
+        </>
       ) : classId && category && report === undefined ? (
         <p className="text-sm text-muted-foreground">Loading report…</p>
       ) : null}

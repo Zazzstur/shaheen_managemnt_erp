@@ -65,22 +65,86 @@ function dash(value: number | null) {
   return value === null ? "—" : formatMark(value);
 }
 
+function printMark(value: number | "AB" | null) {
+  if (value === "AB") {
+    return "AB";
+  }
+  return dash(value);
+}
+
 function markWithinMax(value: string, max: number) {
-  const trimmed = value.trim();
-  if (trimmed === "") {
+  if (value === "") {
     return true;
   }
-  if (!/^\d*\.?\d*$/.test(trimmed)) {
+  if (/^a$/i.test(value) || /^ab$/i.test(value)) {
+    return true;
+  }
+  if (!/^\d*\.?\d*$/.test(value)) {
     return false;
   }
-  const numeric = trimmed.endsWith(".") ? trimmed.slice(0, -1) : trimmed;
+  const numeric = value.endsWith(".") ? value.slice(0, -1) : value;
   const number = Number(numeric === "" ? "0" : numeric);
   return Number.isFinite(number) && number >= 0 && number <= max;
 }
 
-function enteredMark(value: string | undefined) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : 0;
+type ParsedMark =
+  | { state: "empty" }
+  | { state: "absent" }
+  | { state: "value"; value: number }
+  | { state: "invalid" };
+
+function parseMarkField(raw: string, max: number): ParsedMark {
+  const trimmed = raw.trim();
+  if (trimmed === "") {
+    return { state: "empty" };
+  }
+  if (/^ab$/i.test(trimmed)) {
+    return { state: "absent" };
+  }
+  if (!/^\d*\.?\d*$/.test(trimmed)) {
+    return { state: "invalid" };
+  }
+  const numeric = trimmed.endsWith(".") ? trimmed.slice(0, -1) : trimmed;
+  if (numeric === "") {
+    return { state: "invalid" };
+  }
+  const value = Number(numeric);
+  if (!Number.isFinite(value) || value < 0 || value > max) {
+    return { state: "invalid" };
+  }
+  return { state: "value", value };
+}
+
+function storedMark(parsed: ParsedMark): number | "AB" {
+  if (parsed.state === "absent") {
+    return "AB";
+  }
+  if (parsed.state === "value") {
+    return parsed.value;
+  }
+  return 0;
+}
+
+function normalizeDraft(value: string) {
+  if (/^ab$/i.test(value)) {
+    return "AB";
+  }
+  if (/^a$/i.test(value)) {
+    return "A";
+  }
+  return value;
+}
+
+function draftComponent(value: string | undefined): number | "AB" | "blank" {
+  const trimmed = (value ?? "").trim();
+  if (trimmed === "" || /^a$/i.test(trimmed)) {
+    return "blank";
+  }
+  if (/^ab$/i.test(trimmed)) {
+    return "AB";
+  }
+  const number = Number(trimmed);
+  return Number.isFinite(number) ? number : "blank";
 }
 
 function printCategoryTitle(title: string) {
@@ -158,41 +222,49 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
       const notebookRaw = (notebooks[student.studentId] ?? "").trim();
       const enrichmentRaw = (enrichments[student.studentId] ?? "").trim();
       if (selectedCategory.composite) {
-        if (!writtenRaw && !notebookRaw && !enrichmentRaw) {
+        const written = parseMarkField(writtenRaw, 80);
+        const notebook = parseMarkField(notebookRaw, 5);
+        const enrichment = parseMarkField(enrichmentRaw, 5);
+        if (
+          written.state === "empty" &&
+          notebook.state === "empty" &&
+          enrichment.state === "empty"
+        ) {
           continue;
         }
-        const written = Number(writtenRaw || 0);
-        const notebook = Number(notebookRaw || 0);
-        const enrichment = Number(enrichmentRaw || 0);
-        if (!Number.isFinite(written) || written < 0 || written > 80) {
-          toast.error(`${student.studentName}: written marks must be between 0 and 80`);
-          return;
-        }
-        if (!Number.isFinite(notebook) || notebook < 0 || notebook > 5) {
-          toast.error(`${student.studentName}: notebook marks must be between 0 and 5`);
-          return;
-        }
-        if (!Number.isFinite(enrichment) || enrichment < 0 || enrichment > 5) {
+        if (written.state === "invalid") {
           toast.error(
-            `${student.studentName}: subject enrichment marks must be between 0 and 5`,
+            `${student.studentName}: written marks must be between 0 and 80, or AB`,
+          );
+          return;
+        }
+        if (notebook.state === "invalid") {
+          toast.error(
+            `${student.studentName}: notebook marks must be between 0 and 5, or AB`,
+          );
+          return;
+        }
+        if (enrichment.state === "invalid") {
+          toast.error(
+            `${student.studentName}: subject enrichment marks must be between 0 and 5, or AB`,
           );
           return;
         }
         marks.push({
           studentId: student.studentId,
-          marksObtained: written,
-          notebookMarks: notebook,
-          enrichmentMarks: enrichment,
+          marksObtained: storedMark(written),
+          notebookMarks: storedMark(notebook),
+          enrichmentMarks: storedMark(enrichment),
         });
       } else if (writtenRaw) {
-        const written = Number(writtenRaw);
-        if (!Number.isFinite(written) || written < 0 || written > 20) {
-          toast.error(`${student.studentName}: marks must be between 0 and 20`);
+        const written = parseMarkField(writtenRaw, 20);
+        if (written.state === "invalid" || written.state === "empty") {
+          toast.error(`${student.studentName}: marks must be between 0 and 20, or AB`);
           return;
         }
         marks.push({
           studentId: student.studentId,
-          marksObtained: written,
+          marksObtained: storedMark(written),
         });
       }
     }
@@ -357,12 +429,22 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                     : selectedCategory.id === "annual"
                       ? student.classTest2
                       : null;
-                  const classTestPart = classTest === null ? null : classTest / 2;
-                  const written = enteredMark(scores[student.studentId]);
-                  const notebook = enteredMark(notebooks[student.studentId]);
-                  const enrichment = enteredMark(enrichments[student.studentId]);
-                  const total =
-                    written + notebook + enrichment + (classTestPart ?? 0);
+                  const classTestPart =
+                    typeof classTest === "number" ? classTest / 2 : null;
+                  const written = draftComponent(scores[student.studentId]);
+                  const notebook = draftComponent(notebooks[student.studentId]);
+                  const enrichment = draftComponent(enrichments[student.studentId]);
+                  const anyAbsent =
+                    written === "AB" ||
+                    notebook === "AB" ||
+                    enrichment === "AB" ||
+                    classTest === "AB";
+                  const total = anyAbsent
+                    ? null
+                    : (written === "blank" ? 0 : written) +
+                      (notebook === "blank" ? 0 : notebook) +
+                      (enrichment === "blank" ? 0 : enrichment) +
+                      (classTestPart ?? 0);
                   return (
                     <div
                       key={student.studentId}
@@ -377,7 +459,7 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                             </Label>
                             <Input
                               id={`written-${student.studentId}`}
-                              inputMode="decimal"
+                              inputMode="text"
                               value={scores[student.studentId] ?? ""}
                               onChange={(event) => {
                                 const next = event.target.value;
@@ -386,7 +468,7 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                                 }
                                 setScores((current) => ({
                                   ...current,
-                                  [student.studentId]: next,
+                                  [student.studentId]: normalizeDraft(next),
                                 }));
                               }}
                             />
@@ -397,7 +479,7 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                             </Label>
                             <Input
                               id={`notebook-${student.studentId}`}
-                              inputMode="decimal"
+                              inputMode="text"
                               value={notebooks[student.studentId] ?? ""}
                               onChange={(event) => {
                                 const next = event.target.value;
@@ -406,7 +488,7 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                                 }
                                 setNotebooks((current) => ({
                                   ...current,
-                                  [student.studentId]: next,
+                                  [student.studentId]: normalizeDraft(next),
                                 }));
                               }}
                             />
@@ -417,7 +499,7 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                             </Label>
                             <Input
                               id={`enrichment-${student.studentId}`}
-                              inputMode="decimal"
+                              inputMode="text"
                               value={enrichments[student.studentId] ?? ""}
                               onChange={(event) => {
                                 const next = event.target.value;
@@ -426,7 +508,7 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                                 }
                                 setEnrichments((current) => ({
                                   ...current,
-                                  [student.studentId]: next,
+                                  [student.studentId]: normalizeDraft(next),
                                 }));
                               }}
                             />
@@ -434,22 +516,24 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                           <div className="space-y-1">
                             <p className="text-sm font-medium">Periodic test / 2</p>
                             <p className="flex h-9 items-center text-sm text-muted-foreground">
-                              {classTestPart === null
-                                ? "Not entered"
-                                : formatMark(classTestPart)}
+                              {classTest === "AB"
+                                ? "AB"
+                                : classTestPart === null
+                                  ? "Not entered"
+                                  : formatMark(classTestPart)}
                             </p>
                           </div>
                           <div className="space-y-1">
                             <p className="text-sm font-medium">Total / 100</p>
                             <p className="flex h-9 items-center text-sm">
-                              {formatMark(total)}
+                              {total === null ? "—" : formatMark(total)}
                             </p>
                           </div>
                         </div>
                       ) : (
                         <Input
                           id={`score-${student.studentId}`}
-                          inputMode="decimal"
+                          inputMode="text"
                           placeholder="Out of 20"
                           aria-label={`${student.studentName} marks`}
                           value={scores[student.studentId] ?? ""}
@@ -460,7 +544,7 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                             }
                             setScores((current) => ({
                               ...current,
-                              [student.studentId]: next,
+                              [student.studentId]: normalizeDraft(next),
                             }));
                           }}
                         />
@@ -493,12 +577,16 @@ const MARK_HEAD =
   "h-auto py-1.5 text-center align-middle leading-tight";
 
 const MARK_CELL = "text-center align-middle";
+const MARK_FIGURE = "text-center align-middle font-black";
 
 type PrintableReport = FunctionReturnType<typeof api.reportCards.printableReport>;
 type ReportStudent = PrintableReport["students"][number];
 
 function studentTotals(lines: ReportStudent["lines"]) {
-  const scored = lines.filter((line) => line.total !== null);
+  const scored = lines.filter(
+    (line): line is typeof line & { total: number } =>
+      typeof line.total === "number",
+  );
   const obtained = scored.reduce((sum, line) => sum + (line.total ?? 0), 0);
   const maximum = scored.reduce((sum, line) => sum + line.maxMarks, 0);
   const percentExact = maximum === 0 ? null : (obtained / maximum) * 100;
@@ -644,41 +732,43 @@ function ReportCardSheet({
                 ) : (
                   student.lines.map((line) => (
                     <TableRow key={line.subjectId}>
-                      <TableCell className="text-left font-bold">
+                      <TableCell className="text-left font-black">
                         {line.subjectName}
                       </TableCell>
                       {composite ? (
                         <>
-                          <TableCell className={MARK_CELL}>
-                            {line.classTestHalf === null
-                              ? "Not entered"
-                              : formatMark(line.classTestHalf)}
+                          <TableCell className={MARK_FIGURE}>
+                            {line.classTestHalf === "AB"
+                              ? "AB"
+                              : line.classTestHalf === null
+                                ? "Not entered"
+                                : formatMark(line.classTestHalf)}
                           </TableCell>
-                          <TableCell className={MARK_CELL}>
-                            {dash(line.notebook)}
+                          <TableCell className={MARK_FIGURE}>
+                            {printMark(line.notebook)}
                           </TableCell>
-                          <TableCell className={MARK_CELL}>
-                            {dash(line.enrichment)}
+                          <TableCell className={MARK_FIGURE}>
+                            {printMark(line.enrichment)}
                           </TableCell>
-                          <TableCell className={MARK_CELL}>
-                            {dash(line.written)}
+                          <TableCell className={MARK_FIGURE}>
+                            {printMark(line.written)}
                           </TableCell>
-                          <TableCell className={MARK_CELL}>
-                            {line.total === null
-                              ? "—"
-                              : `${formatMark(line.total)} / 100`}
+                          <TableCell className={MARK_FIGURE}>
+                            {typeof line.total === "number"
+                              ? `${formatMark(line.total)} / 100`
+                              : "—"}
                           </TableCell>
                         </>
                       ) : (
                         <>
-                          <TableCell className={MARK_CELL}>
-                            {dash(line.total)}
+                          <TableCell className={MARK_FIGURE}>
+                            {printMark(line.total)}
                           </TableCell>
-                          <TableCell className={MARK_CELL}>20</TableCell>
+                          <TableCell className={MARK_FIGURE}>20</TableCell>
                         </>
                       )}
-                      <TableCell className={MARK_CELL}>
-                        {line.total === null || line.maxMarks === 0
+                      <TableCell className={MARK_FIGURE}>
+                        {typeof line.total !== "number" || line.maxMarks === 0
                           ? "—"
                           : gradeFor((line.total / line.maxMarks) * 100)}
                       </TableCell>
@@ -689,7 +779,7 @@ function ReportCardSheet({
                   <TableCell colSpan={markColumnCount - 2} className="text-left">
                     Total
                   </TableCell>
-                  <TableCell colSpan={2} className={MARK_CELL}>
+                  <TableCell colSpan={2} className={MARK_FIGURE}>
                     {formatMark(totals.obtained)}
                     {totals.maximum > 0 ? ` / ${totals.maximum}` : ""}
                   </TableCell>

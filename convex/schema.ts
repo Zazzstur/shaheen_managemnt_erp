@@ -151,10 +151,10 @@ export default defineSchema({
   marks: defineTable({
     examId: v.id("exams"),
     studentId: v.id("students"),
-    marksObtained: v.number(),
+    marksObtained: v.union(v.number(), v.literal("AB")),
     remarks: v.optional(v.string()),
-    notebookMarks: v.optional(v.number()),
-    enrichmentMarks: v.optional(v.number()),
+    notebookMarks: v.optional(v.union(v.number(), v.literal("AB"))),
+    enrichmentMarks: v.optional(v.union(v.number(), v.literal("AB"))),
   })
     .index("by_exam", ["examId"])
     .index("by_student", ["studentId"])

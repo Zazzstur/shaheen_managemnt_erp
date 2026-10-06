@@ -3,10 +3,12 @@ import { mutation, query } from "./_generated/server";
 import { isIsoDate, requireRoles } from "./lib/auth";
 import { studentName } from "./lib/studentName";
 
+const storedMarkValidator = v.union(v.number(), v.literal("AB"));
+
 const reportLineValidator = v.object({
   subjectId: v.id("subjects"),
   subjectName: v.string(),
-  marksObtained: v.number(),
+  marksObtained: storedMarkValidator,
   maxMarks: v.number(),
   remarks: v.optional(v.string()),
 });
@@ -289,8 +291,11 @@ export const saveSubjectMarks = mutation({
         const incoming = args.marks.find(
           (mark) => mark.studentId === row.studentId,
         );
-        const value = incoming?.marksObtained ?? row.marksObtained;
-        if (value > args.maxMarks) {
+        const stored = row.marksObtained;
+        const value =
+          incoming?.marksObtained ??
+          (typeof stored === "number" ? stored : undefined);
+        if (typeof value === "number" && value > args.maxMarks) {
           throw new Error("Max marks is lower than a mark already saved");
         }
       }
@@ -370,11 +375,31 @@ function pickCategoryExam<T extends { title: string }>(
   return current ?? exams.find((exam) => matchesCategory(exam.title, meta));
 }
 
+function assertStoredMark(
+  value: number | "AB",
+  max: number,
+  message: string,
+) {
+  if (value === "AB") {
+    return;
+  }
+  if (!Number.isFinite(value) || value < 0 || value > max) {
+    throw new ConvexError(message);
+  }
+}
+
+function componentMark(value: number | "AB" | undefined): number | "AB" {
+  if (value === "AB") {
+    return "AB";
+  }
+  return value ?? 0;
+}
+
 const partValidator = v.union(
   v.object({
-    written: v.number(),
-    notebook: v.number(),
-    enrichment: v.number(),
+    written: storedMarkValidator,
+    notebook: storedMarkValidator,
+    enrichment: storedMarkValidator,
   }),
   v.null(),
 );
@@ -390,8 +415,8 @@ export const categorySheet = query({
       v.object({
         studentId: v.id("students"),
         studentName: v.string(),
-        classTest1: v.union(v.number(), v.null()),
-        classTest2: v.union(v.number(), v.null()),
+        classTest1: v.union(v.number(), v.literal("AB"), v.null()),
+        classTest2: v.union(v.number(), v.literal("AB"), v.null()),
         halfYearly: partValidator,
         annual: partValidator,
       }),
@@ -446,16 +471,16 @@ export const categorySheet = query({
         classTest2: classTest2?.get(student._id)?.marksObtained ?? null,
         halfYearly: half
           ? {
-              written: half.marksObtained,
-              notebook: half.notebookMarks ?? 0,
-              enrichment: half.enrichmentMarks ?? 0,
+              written: componentMark(half.marksObtained),
+              notebook: componentMark(half.notebookMarks),
+              enrichment: componentMark(half.enrichmentMarks),
             }
           : null,
         annual: year
           ? {
-              written: year.marksObtained,
-              notebook: year.notebookMarks ?? 0,
-              enrichment: year.enrichmentMarks ?? 0,
+              written: componentMark(year.marksObtained),
+              notebook: componentMark(year.notebookMarks),
+              enrichment: componentMark(year.enrichmentMarks),
             }
           : null,
       });
@@ -477,9 +502,9 @@ export const saveCategoryMarks = mutation({
     marks: v.array(
       v.object({
         studentId: v.id("students"),
-        marksObtained: v.number(),
-        notebookMarks: v.optional(v.number()),
-        enrichmentMarks: v.optional(v.number()),
+        marksObtained: storedMarkValidator,
+        notebookMarks: v.optional(storedMarkValidator),
+        enrichmentMarks: v.optional(storedMarkValidator),
       }),
     ),
   },
@@ -514,30 +539,24 @@ export const saveCategoryMarks = mutation({
         throw new ConvexError("Student is not enrolled in this class");
       }
       const name = studentName(student);
-      if (
-        !Number.isFinite(mark.marksObtained) ||
-        mark.marksObtained < 0 ||
-        mark.marksObtained > meta.maxMarks
-      ) {
-        throw new ConvexError(
-          meta.composite
-            ? `${name}: written marks must be between 0 and 80`
-            : `${name}: marks must be between 0 and 20`,
-        );
-      }
+      assertStoredMark(
+        mark.marksObtained,
+        meta.maxMarks,
+        meta.composite
+          ? `${name}: written marks must be between 0 and 80, or AB`
+          : `${name}: marks must be between 0 and 20, or AB`,
+      );
       if (meta.composite) {
-        const notebook = mark.notebookMarks ?? 0;
-        const enrichment = mark.enrichmentMarks ?? 0;
-        if (!Number.isFinite(notebook) || notebook < 0 || notebook > 5) {
-          throw new ConvexError(
-            `${name}: notebook marks must be between 0 and 5`,
-          );
-        }
-        if (!Number.isFinite(enrichment) || enrichment < 0 || enrichment > 5) {
-          throw new ConvexError(
-            `${name}: subject enrichment marks must be between 0 and 5`,
-          );
-        }
+        assertStoredMark(
+          mark.notebookMarks ?? 0,
+          5,
+          `${name}: notebook marks must be between 0 and 5, or AB`,
+        );
+        assertStoredMark(
+          mark.enrichmentMarks ?? 0,
+          5,
+          `${name}: subject enrichment marks must be between 0 and 5, or AB`,
+        );
       }
     }
 
@@ -597,15 +616,17 @@ export const saveCategoryMarks = mutation({
   },
 });
 
+const printCellValidator = v.union(v.number(), v.literal("AB"), v.null());
+
 const printLineValidator = v.object({
   subjectId: v.id("subjects"),
   subjectName: v.string(),
-  total: v.union(v.number(), v.null()),
+  total: printCellValidator,
   maxMarks: v.number(),
-  written: v.union(v.number(), v.null()),
-  notebook: v.union(v.number(), v.null()),
-  enrichment: v.union(v.number(), v.null()),
-  classTestHalf: v.union(v.number(), v.null()),
+  written: printCellValidator,
+  notebook: printCellValidator,
+  enrichment: printCellValidator,
+  classTestHalf: printCellValidator,
 });
 
 export const printableReport = query({
@@ -733,8 +754,12 @@ export const printableReport = query({
       for (const subjectId of subjectIds) {
         const mark = categoryMarks.get(subjectId)?.get(student._id);
         const linked = linkedMarks.get(subjectId)?.get(student._id);
-        const classTestHalf =
-          linked === undefined ? null : linked.marksObtained / 2;
+        const classTestHalf: number | "AB" | null =
+          linked === undefined
+            ? null
+            : linked.marksObtained === "AB"
+              ? "AB"
+              : linked.marksObtained / 2;
         if (!meta.composite) {
           lines.push({
             subjectId,
@@ -748,19 +773,23 @@ export const printableReport = query({
           });
           continue;
         }
-        const written = mark ? mark.marksObtained : null;
-        const notebook = mark ? (mark.notebookMarks ?? 0) : null;
-        const enrichment = mark ? (mark.enrichmentMarks ?? 0) : null;
+        const written = mark ? componentMark(mark.marksObtained) : null;
+        const notebook = mark ? componentMark(mark.notebookMarks) : null;
+        const enrichment = mark ? componentMark(mark.enrichmentMarks) : null;
+        const anyAbsent = [written, notebook, enrichment, classTestHalf].some(
+          (value) => value === "AB",
+        );
+        const total =
+          typeof written === "number" && !anyAbsent
+            ? written +
+              (typeof notebook === "number" ? notebook : 0) +
+              (typeof enrichment === "number" ? enrichment : 0) +
+              (typeof classTestHalf === "number" ? classTestHalf : 0)
+            : null;
         lines.push({
           subjectId,
           subjectName: subjectNames.get(subjectId) ?? "Unknown subject",
-          total:
-            written === null
-              ? null
-              : written +
-                (notebook ?? 0) +
-                (enrichment ?? 0) +
-                (classTestHalf ?? 0),
+          total,
           maxMarks: 100,
           written,
           notebook,

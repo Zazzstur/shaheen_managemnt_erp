@@ -913,12 +913,61 @@ export default function ReportCardsPage() {
         .print-all-sheets { display: none; }
         @media print {
           @page { size: A4 portrait; margin: 0; }
-          .report-cards-page > * + * { margin-top: 0 !important; }
+          html, body {
+            height: auto !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #EBE9DC !important;
+          }
+          .min-h-screen {
+            min-height: 0 !important;
+            height: auto !important;
+          }
+          .report-cards-page,
+          .report-cards-page > * + * {
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          [data-print-scope="one"] .print-all-sheets { display: none !important; }
+          [data-print-scope="one"] .report-screen-layout {
+            display: block !important;
+            width: 210mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            gap: 0 !important;
+            overflow: hidden !important;
+          }
+          [data-print-scope="one"] .print-sheet-slot {
+            width: 210mm !important;
+            max-width: 210mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            gap: 0 !important;
+          }
           [data-print-scope="all"] .report-screen-layout { display: none !important; }
           [data-print-scope="all"] .print-all-sheets { display: block !important; }
-          .print-all-sheets .print-all-page + .print-all-page {
-            break-before: page;
-            page-break-before: always;
+          .report-a4 {
+            box-sizing: border-box !important;
+            width: 210mm !important;
+            height: calc(297mm - 1px) !important;
+            max-height: calc(297mm - 1px) !important;
+            margin: 0 !important;
+            overflow: hidden !important;
+            break-inside: avoid;
+            page-break-inside: avoid;
+            break-after: avoid;
+            page-break-after: avoid;
+          }
+          .print-all-page {
+            height: calc(297mm - 1px);
+            overflow: hidden;
+            break-after: page;
+            page-break-after: always;
+          }
+          .print-all-page:last-child {
+            break-after: auto;
+            page-break-after: auto;
           }
         }
       `}</style>
@@ -1040,7 +1089,7 @@ export default function ReportCardsPage() {
           </Card>
 
           {report.students.length > 0 ? (
-            <div className="flex w-[210mm] max-w-[210mm] shrink-0 flex-col gap-2">
+            <div className="print-sheet-slot flex w-[210mm] max-w-[210mm] shrink-0 flex-col gap-2">
               <div className="flex justify-end gap-2 print:hidden">
                 {selected ? (
                   <Button

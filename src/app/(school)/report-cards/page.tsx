@@ -614,7 +614,7 @@ function ReportCardSheet({
 
   return (
     <div
-      className={`report-a4 box-border flex h-[297mm] w-[210mm] flex-col bg-[#EBE9DC] p-8 print:h-[297mm] print:w-[210mm] print:[print-color-adjust:exact] ${className ?? ""}`}
+      className={`report-a4 box-border flex h-[297mm] w-[210mm] flex-col bg-[#EBE9DC] p-[64px] print:h-[297mm] print:w-[210mm] print:[print-color-adjust:exact] ${className ?? ""}`}
     >
       <div className="flex h-full min-h-0 flex-col border-[3px] border-[#876738] bg-[#EBE9DC] p-1.5 print:[print-color-adjust:exact]">
         <div className="flex h-full min-h-0 flex-col gap-4 border-[3px] border-[#876738] bg-[#EBE9DC] py-3 print:[print-color-adjust:exact]">

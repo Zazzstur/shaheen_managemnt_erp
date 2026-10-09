@@ -230,6 +230,7 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
           notebook.state === "empty" &&
           enrichment.state === "empty"
         ) {
+          marks.push({ studentId: student.studentId, cleared: true });
           continue;
         }
         if (written.state === "invalid") {
@@ -266,6 +267,8 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
           studentId: student.studentId,
           marksObtained: storedMark(written),
         });
+      } else {
+        marks.push({ studentId: student.studentId, cleared: true });
       }
     }
     setSaving(true);

@@ -502,7 +502,8 @@ export const saveCategoryMarks = mutation({
     marks: v.array(
       v.object({
         studentId: v.id("students"),
-        marksObtained: storedMarkValidator,
+        cleared: v.optional(v.boolean()),
+        marksObtained: v.optional(storedMarkValidator),
         notebookMarks: v.optional(storedMarkValidator),
         enrichmentMarks: v.optional(storedMarkValidator),
       }),
@@ -513,9 +514,6 @@ export const saveCategoryMarks = mutation({
     await requireRoles(ctx, ["teacher"]);
     if (!isIsoDate(args.date)) {
       throw new ConvexError("Report date must be YYYY-MM-DD");
-    }
-    if (args.marks.length === 0) {
-      throw new ConvexError("Enter marks for at least one student");
     }
     if (args.marks.length > 80) {
       throw new ConvexError("Too many students in one save");
@@ -537,6 +535,12 @@ export const saveCategoryMarks = mutation({
         student.status !== "enrolled"
       ) {
         throw new ConvexError("Student is not enrolled in this class");
+      }
+      if (mark.cleared) {
+        continue;
+      }
+      if (mark.marksObtained === undefined) {
+        throw new ConvexError("Enter a mark or leave every field empty to clear it");
       }
       const name = studentName(student);
       assertStoredMark(
@@ -568,6 +572,10 @@ export const saveCategoryMarks = mutation({
       exams.filter((item) => item.subjectId === args.subjectId),
       meta,
     );
+    const hasMarksToSave = args.marks.some((mark) => !mark.cleared);
+    if (!existingExam && !hasMarksToSave) {
+      return null;
+    }
     const examId = existingExam
       ? existingExam._id
       : await ctx.db.insert("exams", {
@@ -595,6 +603,15 @@ export const saveCategoryMarks = mutation({
           q.eq("examId", examId).eq("studentId", mark.studentId),
         )
         .unique();
+      if (mark.cleared) {
+        if (existing) {
+          await ctx.db.delete("marks", existing._id);
+        }
+        continue;
+      }
+      if (mark.marksObtained === undefined) {
+        throw new ConvexError("Enter a mark or leave every field empty to clear it");
+      }
       const patch = meta.composite
         ? {
             marksObtained: mark.marksObtained,

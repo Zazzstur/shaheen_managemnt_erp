@@ -754,6 +754,9 @@ export const printableReport = query({
       for (const subjectId of subjectIds) {
         const mark = categoryMarks.get(subjectId)?.get(student._id);
         const linked = linkedMarks.get(subjectId)?.get(student._id);
+        if (mark === undefined && linked === undefined) {
+          continue;
+        }
         const classTestHalf: number | "AB" | null =
           linked === undefined
             ? null

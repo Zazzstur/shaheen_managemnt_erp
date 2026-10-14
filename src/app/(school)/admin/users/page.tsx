@@ -5,6 +5,7 @@ import { useAction, useMutation, usePaginatedQuery, useQuery } from "convex/reac
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { api } from "@convex/_generated/api";
+import { Id } from "@convex/_generated/dataModel";
 import { toast } from "sonner";
 import { mutationResult } from "@/lib/result";
 import { teacherAccountSchema } from "@/lib/schemas";
@@ -41,6 +42,14 @@ type TeacherAccountInput = {
   password: string;
 };
 
+const STAFF_ROLES = {
+  teacher: "Teacher",
+  class_teacher: "Class teacher",
+  data_entry: "Data entry",
+} as const;
+
+type StaffRole = keyof typeof STAFF_ROLES;
+
 const defaults: TeacherAccountInput = {
   name: "",
   email: "",
@@ -49,33 +58,58 @@ const defaults: TeacherAccountInput = {
 
 export default function TeachersPage() {
   const me = useQuery(api.users.me);
+  const isSuperAdmin = me?.role === "super_admin";
   const { results, status, loadMore } = usePaginatedQuery(
     api.users.list,
-    { role: "teacher" },
+    isSuperAdmin ? { role: "teacher" } : "skip",
     { initialNumItems: 20 },
   );
   const createTeacher = useAction(api.users.createTeacher);
   const setStatus = useMutation(api.users.setStatus);
+  const assignStaffRole = useMutation(api.users.setStaffRole);
+  const classes = useQuery(
+    api.catalog.listClasses,
+    isSuperAdmin ? {} : "skip",
+  );
   const [saving, setSaving] = useState(false);
+  const [staffRole, setStaffRole] = useState<StaffRole>("teacher");
+  const [classId, setClassId] = useState<Id<"classes"> | "">("");
+  const [openClassFor, setOpenClassFor] = useState<Id<"users"> | null>(null);
+  const classItems = Object.fromEntries(
+    (classes ?? []).map((classroom) => [
+      classroom._id,
+      `${classroom.name} ${classroom.section}`.trim(),
+    ]),
+  );
   const form = useForm<TeacherAccountInput>({
     resolver: zodResolver(teacherAccountSchema),
     defaultValues: defaults,
   });
 
-  if (me && me.role !== "super_admin") {
+  if (me && !isSuperAdmin) {
     return (
       <p className="text-sm text-muted-foreground">
-        Only super admins can add teacher logins.
+        Only super admins can open the teachers page.
       </p>
     );
   }
 
   const onSubmit = form.handleSubmit(async (values) => {
+    if (staffRole === "class_teacher" && !classId) {
+      toast.error("Select a class for the class teacher");
+      return;
+    }
     setSaving(true);
     try {
-      await createTeacher(values);
+      await createTeacher({
+        ...values,
+        staffRole,
+        ...(staffRole === "class_teacher" && classId ? { classId } : {}),
+      });
       toast.success("Teacher login created");
       form.reset(defaults);
+      setStaffRole("teacher");
+      setClassId("");
     } catch (error) {
       toast.error(mutationResult(error).message);
     } finally {
@@ -142,6 +176,59 @@ export default function TeachersPage() {
                 </p>
               ) : null}
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="teacher-role">Role</Label>
+              <Select
+                value={staffRole}
+                items={STAFF_ROLES}
+                onValueChange={(next) => {
+                  if (
+                    next === "teacher" ||
+                    next === "class_teacher" ||
+                    next === "data_entry"
+                  ) {
+                    setStaffRole(next);
+                    if (next !== "class_teacher") {
+                      setClassId("");
+                    }
+                  }
+                }}
+              >
+                <SelectTrigger id="teacher-role" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="teacher">Teacher</SelectItem>
+                  <SelectItem value="class_teacher">Class teacher</SelectItem>
+                  <SelectItem value="data_entry">Data entry</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {staffRole === "class_teacher" ? (
+              <div className="space-y-2">
+                <Label htmlFor="teacher-class">Class</Label>
+                <Select
+                  value={classId || null}
+                  items={classItems}
+                  onValueChange={(next) => {
+                    if (next) {
+                      setClassId(next as Id<"classes">);
+                    }
+                  }}
+                >
+                  <SelectTrigger id="teacher-class" className="w-full">
+                    <SelectValue placeholder="Select class" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(classes ?? []).map((classroom) => (
+                      <SelectItem key={classroom._id} value={classroom._id}>
+                        {classroom.name} {classroom.section}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
             <div className="md:col-span-2">
               <Button type="submit" disabled={saving}>
                 {saving ? "Saving…" : "Add teacher"}
@@ -172,6 +259,7 @@ export default function TeachersPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Role</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -213,6 +301,83 @@ export default function TeachersPage() {
                             <SelectItem value="suspended">Suspended</SelectItem>
                           </SelectContent>
                         </Select>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Select
+                          value={user.staffRole ?? "teacher"}
+                          items={STAFF_ROLES}
+                          onValueChange={(next) => {
+                            if (
+                              next !== "teacher" &&
+                              next !== "class_teacher" &&
+                              next !== "data_entry"
+                            ) {
+                              return;
+                            }
+                            if (next === "class_teacher") {
+                              setOpenClassFor(user._id);
+                            } else {
+                              setOpenClassFor(null);
+                            }
+                            void assignStaffRole({
+                              userId: user._id,
+                              staffRole: next,
+                              ...(next === "class_teacher" && user.classId
+                                ? { classId: user.classId }
+                                : {}),
+                            }).catch((error) =>
+                              toast.error(mutationResult(error).message),
+                            );
+                          }}
+                        >
+                          <SelectTrigger className="w-40">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="teacher">Teacher</SelectItem>
+                            <SelectItem value="class_teacher">
+                              Class teacher
+                            </SelectItem>
+                            <SelectItem value="data_entry">Data entry</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {user.staffRole === "class_teacher" ? (
+                          <Select
+                            open={openClassFor === user._id}
+                            onOpenChange={(open) =>
+                              setOpenClassFor(open ? user._id : null)
+                            }
+                            value={user.classId ?? null}
+                            items={classItems}
+                            onValueChange={(next) => {
+                              if (!next) return;
+                              setOpenClassFor(null);
+                              void assignStaffRole({
+                                userId: user._id,
+                                staffRole: "class_teacher",
+                                classId: next as Id<"classes">,
+                              }).catch((error) =>
+                                toast.error(mutationResult(error).message),
+                              );
+                            }}
+                          >
+                            <SelectTrigger className="w-40">
+                              <SelectValue placeholder="Select class" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(classes ?? []).map((classroom) => (
+                                <SelectItem
+                                  key={classroom._id}
+                                  value={classroom._id}
+                                >
+                                  {classroom.name} {classroom.section}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>

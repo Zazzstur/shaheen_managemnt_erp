@@ -9,6 +9,7 @@ import {
   schoolAffiliationValidator,
   socialCategoryValidator,
   studentStatusValidator,
+  staffRoleValidator,
   userRoleValidator,
   userStatusValidator,
 } from "./lib/validators";
@@ -25,10 +26,13 @@ export default defineSchema({
     isAnonymous: v.optional(v.boolean()),
     role: userRoleValidator,
     status: userStatusValidator,
+    staffRole: v.optional(staffRoleValidator),
+    classId: v.optional(v.id("classes")),
   })
     .index("email", ["email"])
     .index("phone", ["phone"])
-    .index("by_role", ["role"]),
+    .index("by_role", ["role"])
+    .index("by_class", ["classId"]),
 
   classes: defineTable({
     name: v.string(),
@@ -106,10 +110,24 @@ export default defineSchema({
     periodNumber: v.number(),
     subjectId: v.id("subjects"),
     teacherId: v.optional(v.id("users")),
+    assistantTeacherId: v.optional(v.id("users")),
   })
     .index("by_class", ["classId"])
     .index("by_class_day_period", ["classId", "dayOfWeek", "periodNumber"])
-    .index("by_teacher", ["teacherId"]),
+    .index("by_teacher", ["teacherId"])
+    .index("by_assistant_teacher", ["assistantTeacherId"])
+    .index("by_day", ["dayOfWeek"]),
+
+  homework: defineTable({
+    classId: v.id("classes"),
+    subjectId: v.id("subjects"),
+    periodNumber: v.optional(v.number()),
+    date: v.string(),
+    message: v.string(),
+    enteredBy: v.id("users"),
+  })
+    .index("by_class_and_date", ["classId", "date"])
+    .index("by_class_subject_and_date", ["classId", "subjectId", "date"]),
 
   fees: defineTable({
     studentId: v.id("students"),

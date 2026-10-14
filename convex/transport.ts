@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { requireRoles, requireSuperAdmin } from "./lib/auth";
+import { requireSchoolAdmin } from "./lib/auth";
 import { studentName } from "./lib/studentName";
 
 const routeDocValidator = v.object({
@@ -43,7 +43,7 @@ export const listRoutes = query({
   args: {},
   returns: v.array(routeDocValidator),
   handler: async (ctx) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     const routes = await ctx.db.query("transportRoutes").take(50);
     const rows = [];
     for (const route of routes) {
@@ -64,7 +64,7 @@ export const listAssignmentsForRoute = query({
   args: { routeId: v.id("transportRoutes") },
   returns: v.array(assignmentRowValidator),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     const route = await ctx.db.get("transportRoutes", args.routeId);
     if (!route) {
       throw new Error("Route not found");
@@ -101,7 +101,7 @@ export const listStudentRows = query({
   },
   returns: v.array(studentTransportRowValidator),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     const term = args.search?.trim().toLowerCase().slice(0, 100) ?? "";
     const students = await ctx.db.query("students").take(80);
     const rows = [];
@@ -164,7 +164,7 @@ export const createRoute = mutation({
   },
   returns: v.id("transportRoutes"),
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSchoolAdmin(ctx);
     const name = args.name.trim();
     const driverName = args.driverName.trim();
     const vehicleNumber = args.vehicleNumber.trim();
@@ -195,7 +195,7 @@ export const updateRoute = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSchoolAdmin(ctx);
     const route = await ctx.db.get("transportRoutes", args.routeId);
     if (!route) {
       throw new Error("Route not found");
@@ -223,7 +223,7 @@ export const assignStudent = mutation({
   },
   returns: v.id("studentTransport"),
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSchoolAdmin(ctx);
     const student = await ctx.db.get("students", args.studentId);
     if (!student || student.status !== "enrolled") {
       throw new Error("Student not found");
@@ -263,7 +263,7 @@ export const setCustomFee = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSchoolAdmin(ctx);
     const existing = await ctx.db
       .query("studentTransport")
       .withIndex("by_student", (q) => q.eq("studentId", args.studentId))
@@ -291,7 +291,7 @@ export const setStop = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSchoolAdmin(ctx);
     const existing = await ctx.db
       .query("studentTransport")
       .withIndex("by_student", (q) => q.eq("studentId", args.studentId))
@@ -311,7 +311,7 @@ export const unassignStudent = mutation({
   args: { studentId: v.id("students") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSchoolAdmin(ctx);
     const existing = await ctx.db
       .query("studentTransport")
       .withIndex("by_student", (q) => q.eq("studentId", args.studentId))

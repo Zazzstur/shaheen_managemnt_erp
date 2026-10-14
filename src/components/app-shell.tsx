@@ -14,6 +14,7 @@ import {
   GraduationCap,
   LayoutDashboard,
   Menu,
+  NotebookPen,
   Receipt,
   School,
   Users,
@@ -77,7 +78,8 @@ const NAV = [
     href: "/teacher/attendance",
     label: "Attendance",
     icon: ClipboardCheck,
-    roles: ["super_admin", "teacher"],
+    roles: ["teacher"],
+    staffRoles: ["class_teacher"],
   },
   {
     href: "/report-cards",
@@ -91,19 +93,34 @@ const NAV = [
     icon: CalendarDays,
     roles: ["super_admin", "teacher", "student", "parent"],
   },
+  {
+    href: "/homework",
+    label: "Homework",
+    icon: NotebookPen,
+    roles: ["super_admin", "teacher"],
+  },
 ] as const;
 
 function NavLinks({
   role,
+  staffRole,
   onNavigate,
 }: {
   role: string;
+  staffRole?: string;
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
   return (
     <nav className="flex flex-col gap-1">
-      {NAV.filter((item) => item.roles.includes(role as never)).map((item) => {
+      {NAV.filter((item) => {
+        if (item.href === "/admin/users" && staffRole === "data_entry") {
+          return false;
+        }
+        if (!item.roles.includes(role as never)) return false;
+        if (!("staffRoles" in item)) return true;
+        return item.staffRoles.includes(staffRole as never);
+      }).map((item) => {
         const Icon = item.icon;
         const active = pathname === item.href;
         return (
@@ -150,11 +167,16 @@ function SidebarBody() {
         </p>
         <p className="mt-2 font-medium">{user.name ?? user.email}</p>
         <Badge className="mt-2" variant="secondary">
-          {user.role.replace("_", " ")}
+          {user.staffRole === "data_entry"
+            ? "data entry"
+            : user.role.replace("_", " ")}
         </Badge>
       </div>
       <Separator />
-      <NavLinks role={user.role} />
+      <NavLinks
+        role={user.staffRole === "data_entry" ? "super_admin" : user.role}
+        staffRole={user.staffRole}
+      />
       <div className="mt-auto">
         <Button
           variant="outline"

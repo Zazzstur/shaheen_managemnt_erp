@@ -13,6 +13,12 @@ export const userStatusValidator = v.union(
   v.literal("suspended"),
 );
 
+export const staffRoleValidator = v.union(
+  v.literal("teacher"),
+  v.literal("class_teacher"),
+  v.literal("data_entry"),
+);
+
 export const genderValidator = v.union(
   v.literal("female"),
   v.literal("male"),
@@ -86,6 +92,8 @@ export const userDocValidator = v.object({
   isAnonymous: v.optional(v.boolean()),
   role: userRoleValidator,
   status: userStatusValidator,
+  staffRole: v.optional(staffRoleValidator),
+  classId: v.optional(v.id("classes")),
 });
 
 export const classDocValidator = v.object({

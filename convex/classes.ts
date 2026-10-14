@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { requireRoles, requireSuperAdmin } from "./lib/auth";
+import { requireSchoolAdmin, requireSuperAdmin } from "./lib/auth";
 import {
   classAdminRowValidator,
   extraFeeValidator,
@@ -38,7 +38,7 @@ export const listWithStats = query({
   args: {},
   returns: v.array(classAdminRowValidator),
   handler: async (ctx) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     const classes = await ctx.db.query("classes").take(100);
     const rows = [];
     for (const classroom of classes) {

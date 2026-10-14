@@ -1,7 +1,31 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
-import { isIsoDate, requireRoles } from "./lib/auth";
+import { Doc, Id } from "./_generated/dataModel";
+import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
+import { isIsoDate, requireRoles, requireSchoolAdmin } from "./lib/auth";
 import { studentName } from "./lib/studentName";
+
+async function assertTeacherAssigned(
+  ctx: QueryCtx | MutationCtx,
+  user: Doc<"users">,
+  classId: Id<"classes">,
+  subjectId: Id<"subjects">,
+) {
+  if (user.role !== "teacher") {
+    return;
+  }
+  const slots = await ctx.db
+    .query("timetables")
+    .withIndex("by_teacher", (q) => q.eq("teacherId", user._id))
+    .take(200);
+  const assigned = slots.some(
+    (slot) => slot.classId === classId && slot.subjectId === subjectId,
+  );
+  if (!assigned) {
+    throw new ConvexError(
+      "Only the main teacher can enter marks for this class and subject",
+    );
+  }
+}
 
 const storedMarkValidator = v.union(v.number(), v.literal("AB"));
 
@@ -423,7 +447,8 @@ export const categorySheet = query({
     ),
   }),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin", "teacher"]);
+    const user = await requireRoles(ctx, ["super_admin", "teacher"]);
+    await assertTeacherAssigned(ctx, user, args.classId, args.subjectId);
     const classroom = await ctx.db.get("classes", args.classId);
     if (!classroom) {
       throw new Error("Class not found");
@@ -511,7 +536,8 @@ export const saveCategoryMarks = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["teacher"]);
+    const user = await requireRoles(ctx, ["teacher"]);
+    await assertTeacherAssigned(ctx, user, args.classId, args.subjectId);
     if (!isIsoDate(args.date)) {
       throw new ConvexError("Report date must be YYYY-MM-DD");
     }
@@ -669,7 +695,7 @@ export const printableReport = query({
     ),
   }),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     const classroom = await ctx.db.get("classes", args.classId);
     if (!classroom) {
       throw new Error("Class not found");

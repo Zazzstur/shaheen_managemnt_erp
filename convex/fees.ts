@@ -5,7 +5,10 @@ import { Doc, Id } from "./_generated/dataModel";
 import {
   assertStudentAccess,
   isIsoDate,
+  isSchoolAdmin,
   requireRoles,
+  requireRolesIncludingDataEntry,
+  requireSchoolAdmin,
   requireSuperAdmin,
 } from "./lib/auth";
 import { feeListItemValidator, feeStatusValidator } from "./lib/validators";
@@ -47,13 +50,13 @@ export const list = query({
     ),
   }),
   handler: async (ctx, args) => {
-    const user = await requireRoles(ctx, [
+    const user = await requireRolesIncludingDataEntry(ctx, [
       "super_admin",
       "parent",
       "student",
     ]);
     const result =
-      args.status && user.role === "super_admin"
+      args.status && isSchoolAdmin(user)
         ? await ctx.db
             .query("fees")
             .withIndex("by_status", (q) => q.eq("status", args.status!))
@@ -87,7 +90,7 @@ export const quoteForStudent = query({
   args: { studentId: v.id("students") },
   returns: feeQuoteValidator,
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSchoolAdmin(ctx);
     return await quoteStudentFee(ctx, args.studentId);
   },
 });
@@ -174,7 +177,7 @@ export const summary = query({
     monthlyPaymentCount: v.number(),
   }),
   handler: async (ctx, args) => {
-    const user = await requireRoles(ctx, [
+    const user = await requireRolesIncludingDataEntry(ctx, [
       "super_admin",
       "parent",
       "student",
@@ -437,7 +440,7 @@ export const searchStudents = query({
   args: { term: v.string() },
   returns: v.array(searchHitValidator),
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSchoolAdmin(ctx);
     const term = args.term.trim().toLowerCase();
     if (term.length < 1) {
       return [];
@@ -488,7 +491,7 @@ export const filterStudents = query({
   },
   returns: v.array(filterHitValidator),
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSchoolAdmin(ctx);
     if (!isIsoDate(args.asOf)) {
       throw new Error("Date must be YYYY-MM-DD");
     }
@@ -554,7 +557,7 @@ export const statement = query({
   },
   returns: feeStatementValidator,
   handler: async (ctx, args) => {
-    const user = await requireRoles(ctx, [
+    const user = await requireRolesIncludingDataEntry(ctx, [
       "super_admin",
       "parent",
       "student",
@@ -681,7 +684,7 @@ export const paymentInvoice = query({
   args: { paymentId: v.id("feePayments") },
   returns: paymentInvoiceValidator,
   handler: async (ctx, args) => {
-    const user = await requireRoles(ctx, [
+    const user = await requireRolesIncludingDataEntry(ctx, [
       "super_admin",
       "parent",
       "student",
@@ -822,7 +825,7 @@ export const schoolSnapshot = query({
     studentsWithDue: v.number(),
   }),
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSchoolAdmin(ctx);
     assertDateRange(args.collectionFrom, args.collectionTo);
     if (!isIsoDate(args.asOf)) {
       throw new Error("Date must be YYYY-MM-DD");
@@ -886,7 +889,7 @@ export const collectionReport = query({
     rows: v.array(collectionRowValidator),
   }),
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSchoolAdmin(ctx);
     assertDateRange(args.from, args.to);
     const students = await enrolledStudents(ctx, args.classId);
     const rows = [];
@@ -951,7 +954,7 @@ export const dueReport = query({
     rows: v.array(dueRowValidator),
   }),
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSchoolAdmin(ctx);
     assertDateRange(args.from, args.to);
     const fromMonth = args.from.slice(0, 7);
     const toMonth = args.to.slice(0, 7);
@@ -1009,7 +1012,7 @@ export const exportRows = query({
   args: { asOf: v.string() },
   returns: v.array(feeExportRowValidator),
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSchoolAdmin(ctx);
     if (!isIsoDate(args.asOf)) {
       throw new Error("Date must be YYYY-MM-DD");
     }
@@ -1047,7 +1050,7 @@ export const invoiceMessage = query({
   args: {},
   returns: v.string(),
   handler: async (ctx) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     const notice = await ctx.db.query("invoiceNotice").first();
     return notice?.message ?? "";
   },

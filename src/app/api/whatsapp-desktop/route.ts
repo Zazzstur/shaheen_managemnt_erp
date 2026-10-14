@@ -35,7 +35,9 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, pasted: false }, { status: 400 });
   }
 
-  if (typeof body.phone !== "string" || !phonePattern.test(body.phone)) {
+  const phone = typeof body.phone === "string" ? body.phone : "";
+  const choosingRecipient = phone.length === 0;
+  if (!choosingRecipient && !phonePattern.test(phone)) {
     return Response.json({ ok: false, pasted: false }, { status: 400 });
   }
   if (typeof body.caption !== "string" || body.caption.length > 500) {
@@ -57,21 +59,33 @@ export async function POST(request: Request) {
   try {
     await execFileAsync(
       "powershell.exe",
-      [
-        "-STA",
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        join(process.cwd(), "scripts", "share-invoice-whatsapp.ps1"),
-        "-Phone",
-        body.phone,
-        "-ImagePath",
-        imagePath,
-        "-Caption",
-        body.caption,
-      ],
+      choosingRecipient
+        ? [
+            "-STA",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            join(process.cwd(), "scripts", "share-homework-whatsapp.ps1"),
+            "-ImagePath",
+            imagePath,
+          ]
+        : [
+            "-STA",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            join(process.cwd(), "scripts", "share-invoice-whatsapp.ps1"),
+            "-Phone",
+            phone,
+            "-ImagePath",
+            imagePath,
+            "-Caption",
+            body.caption,
+          ],
       { timeout: 20_000, windowsHide: true },
     );
     return Response.json({ ok: true, pasted: true });

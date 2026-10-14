@@ -152,8 +152,7 @@ function printCategoryTitle(title: string) {
 }
 
 function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
-  const classes = useQuery(api.catalog.listClasses);
-  const subjects = useQuery(api.catalog.listSubjects);
+  const assignments = useQuery(api.timetables.myTeachingAssignments);
   const [classId, setClassId] = useState<Id<"classes"> | "">("");
   const [subjectId, setSubjectId] = useState<Id<"subjects"> | "">("");
   const [category, setCategory] = useState<ReportCategory | "">("");
@@ -169,6 +168,26 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
     classId && subjectId ? { classId, subjectId } : "skip",
   );
   const selectedCategory = CATEGORIES.find((item) => item.id === category);
+  const classOptions = (assignments ?? []).filter(
+    (assignment, index, list) =>
+      list.findIndex((item) => item.classId === assignment.classId) === index,
+  );
+  const subjectOptions = (assignments ?? []).filter(
+    (assignment) => assignment.classId === classId,
+  );
+
+  useEffect(() => {
+    if (!assignments || !subjectId) {
+      return;
+    }
+    const stillAssigned = assignments.some(
+      (assignment) =>
+        assignment.classId === classId && assignment.subjectId === subjectId,
+    );
+    if (!stillAssigned) {
+      setSubjectId("");
+    }
+  }, [assignments, classId, subjectId]);
 
   useEffect(() => {
     if (!sheet || !category || !classId || !subjectId) {
@@ -208,8 +227,8 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
   }, [sheet, category, classId, subjectId]);
 
   const subjectName =
-    (subjects ?? []).find((subject) => subject._id === subjectId)?.name ??
-    "Subject";
+    subjectOptions.find((subject) => subject.subjectId === subjectId)
+      ?.subjectName ?? "Subject";
 
   async function onSave() {
     if (!classId || !subjectId || !category || !sheet || !selectedCategory) {
@@ -307,37 +326,43 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-3">
+          {assignments === undefined ? (
+            <p className="text-sm text-muted-foreground md:col-span-3">
+              Loading your timetable…
+            </p>
+          ) : assignments.length === 0 ? (
+            <p className="text-sm text-muted-foreground md:col-span-3">
+              No classes or subjects are assigned to you on the timetable.
+            </p>
+          ) : null}
+          {assignments && assignments.length > 0 ? (
+          <>
           <div className="space-y-2">
             <Label>Class</Label>
             <Select
               value={classId || null}
               items={Object.fromEntries(
-                (classes ?? []).map((classroom) => [
-                  classroom._id,
-                  `${classroom.name} ${classroom.section}`.trim(),
+                classOptions.map((classroom) => [
+                  classroom.classId,
+                  classroom.classLabel,
                 ]),
               )}
               onValueChange={(value) => {
                 setClassId((value as Id<"classes">) || "");
+                setSubjectId("");
                 seededFor.current = "";
               }}
             >
               <SelectTrigger className="w-full">
                 <span className="truncate">
-                  {(() => {
-                    const selectedClass = (classes ?? []).find(
-                      (classroom) => classroom._id === classId,
-                    );
-                    return selectedClass
-                      ? `${selectedClass.name} ${selectedClass.section}`.trim()
-                      : "Select class";
-                  })()}
+                  {classOptions.find((classroom) => classroom.classId === classId)
+                    ?.classLabel ?? "Select class"}
                 </span>
               </SelectTrigger>
               <SelectContent>
-                {(classes ?? []).map((classroom) => (
-                  <SelectItem key={classroom._id} value={classroom._id}>
-                    {classroom.name} {classroom.section}
+                {classOptions.map((classroom) => (
+                  <SelectItem key={classroom.classId} value={classroom.classId}>
+                    {classroom.classLabel}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -348,7 +373,10 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
             <Select
               value={subjectId || null}
               items={Object.fromEntries(
-                (subjects ?? []).map((subject) => [subject._id, subject.name]),
+                subjectOptions.map((subject) => [
+                  subject.subjectId,
+                  subject.subjectName,
+                ]),
               )}
               onValueChange={(value) => {
                 setSubjectId((value as Id<"subjects">) || "");
@@ -357,14 +385,14 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
             >
               <SelectTrigger className="w-full">
                 <span className="truncate">
-                  {(subjects ?? []).find((subject) => subject._id === subjectId)
-                    ?.name ?? "Select subject"}
+                  {subjectOptions.find((subject) => subject.subjectId === subjectId)
+                    ?.subjectName ?? "Select subject"}
                 </span>
               </SelectTrigger>
               <SelectContent>
-                {(subjects ?? []).map((subject) => (
-                  <SelectItem key={subject._id} value={subject._id}>
-                    {subject.name}
+                {subjectOptions.map((subject) => (
+                  <SelectItem key={subject.subjectId} value={subject.subjectId}>
+                    {subject.subjectName}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -403,6 +431,8 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
               </SelectContent>
             </Select>
           </div>
+          </>
+          ) : null}
         </CardContent>
       </Card>
 

@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { isIsoDate, requireRoles } from "./lib/auth";
+import { isIsoDate, requireClassTeacherForClass } from "./lib/auth";
 import { attendanceStatusValidator } from "./lib/validators";
 import { studentName } from "./lib/studentName";
 
@@ -18,7 +18,7 @@ export const rosterForClassDate = query({
   },
   returns: v.array(rosterItemValidator),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin", "teacher"]);
+    await requireClassTeacherForClass(ctx, args.classId);
     if (!isIsoDate(args.date)) {
       throw new Error("Date must be YYYY-MM-DD");
     }
@@ -61,7 +61,7 @@ export const markBatch = mutation({
   },
   returns: v.object({ saved: v.number() }),
   handler: async (ctx, args) => {
-    const marker = await requireRoles(ctx, ["super_admin", "teacher"]);
+    const marker = await requireClassTeacherForClass(ctx, args.classId);
     if (!isIsoDate(args.date)) {
       throw new Error("Date must be YYYY-MM-DD");
     }

@@ -1,10 +1,21 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { createAccount } from "@convex-dev/auth/server";
-import { action, internalQuery, mutation, query } from "./_generated/server";
+import {
+  action,
+  internalQuery,
+  mutation,
+  query,
+  type MutationCtx,
+} from "./_generated/server";
+import { type Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getCurrentUser, requireSuperAdmin } from "./lib/auth";
-import { userDocValidator, userRoleValidator } from "./lib/validators";
+import {
+  staffRoleValidator,
+  userDocValidator,
+  userRoleValidator,
+} from "./lib/validators";
 
 export const me = query({
   args: {},
@@ -96,6 +107,61 @@ export const setRole = mutation({
   },
 });
 
+async function assertClassTeacherAvailable(
+  ctx: MutationCtx,
+  classId: Id<"classes">,
+  exceptUserId?: Id<"users">,
+) {
+  const classroom = await ctx.db.get("classes", classId);
+  if (!classroom) {
+    throw new Error("Class not found");
+  }
+  const holders = await ctx.db
+    .query("users")
+    .withIndex("by_class", (q) => q.eq("classId", classId))
+    .take(10);
+  const taken = holders.some(
+    (user) => user._id !== exceptUserId && user.staffRole === "class_teacher",
+  );
+  if (taken) {
+    throw new Error("That class already has a class teacher");
+  }
+}
+
+export const setStaffRole = mutation({
+  args: {
+    userId: v.id("users"),
+    staffRole: staffRoleValidator,
+    classId: v.optional(v.id("classes")),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx);
+    const target = await ctx.db.get("users", args.userId);
+    if (!target) {
+      throw new Error("User not found");
+    }
+    if (target.role !== "teacher") {
+      throw new Error("Staff roles can only be assigned to teacher logins");
+    }
+    if (args.staffRole !== "class_teacher") {
+      await ctx.db.patch("users", args.userId, {
+        staffRole: args.staffRole,
+        classId: undefined,
+      });
+      return null;
+    }
+    if (args.classId) {
+      await assertClassTeacherAvailable(ctx, args.classId, args.userId);
+    }
+    await ctx.db.patch("users", args.userId, {
+      staffRole: "class_teacher",
+      classId: args.classId,
+    });
+    return null;
+  },
+});
+
 export const setStatus = mutation({
   args: {
     userId: v.id("users"),
@@ -129,6 +195,26 @@ export const assertSuperAdmin = internalQuery({
   },
 });
 
+export const assertClassAvailable = internalQuery({
+  args: { classId: v.id("classes") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx);
+    const classroom = await ctx.db.get("classes", args.classId);
+    if (!classroom) {
+      throw new Error("Class not found");
+    }
+    const holders = await ctx.db
+      .query("users")
+      .withIndex("by_class", (q) => q.eq("classId", args.classId))
+      .take(10);
+    if (holders.some((user) => user.staffRole === "class_teacher")) {
+      throw new Error("That class already has a class teacher");
+    }
+    return null;
+  },
+});
+
 export const teacherEmailTaken = internalQuery({
   args: { email: v.string() },
   returns: v.boolean(),
@@ -147,6 +233,8 @@ export const createTeacher = action({
     name: v.string(),
     email: v.string(),
     password: v.string(),
+    staffRole: v.optional(staffRoleValidator),
+    classId: v.optional(v.id("classes")),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -168,6 +256,15 @@ export const createTeacher = action({
     if (taken) {
       throw new Error("An account with this email already exists");
     }
+    const staffRole = args.staffRole ?? "teacher";
+    if (staffRole === "class_teacher" && !args.classId) {
+      throw new Error("Select a class for the class teacher");
+    }
+    if (staffRole === "class_teacher" && args.classId) {
+      await ctx.runQuery(internal.users.assertClassAvailable, {
+        classId: args.classId,
+      });
+    }
     await createAccount(ctx, {
       provider: "password",
       account: { id: email, secret: args.password },
@@ -176,6 +273,10 @@ export const createTeacher = action({
         name,
         role: "teacher",
         status: "active",
+        staffRole,
+        ...(staffRole === "class_teacher" && args.classId
+          ? { classId: args.classId }
+          : {}),
       },
     });
     return null;

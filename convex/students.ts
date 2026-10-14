@@ -9,7 +9,7 @@ import {
 } from "./lib/feeLedger";
 import { Doc, Id } from "./_generated/dataModel";
 import { uniqueInvoiceNumber } from "./lib/feeQuote";
-import { isIsoDate, requireRoles } from "./lib/auth";
+import { isIsoDate, requireRoles, requireSchoolAdmin } from "./lib/auth";
 import { studentName } from "./lib/studentName";
 import {
   genderValidator,
@@ -39,7 +39,7 @@ export const list = query({
     ),
   }),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     const result = args.classId
       ? await ctx.db
           .query("students")
@@ -70,7 +70,7 @@ export const listByClass = query({
   args: { classId: v.id("classes") },
   returns: v.array(studentListItemValidator),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     const students = await ctx.db
       .query("students")
       .withIndex("by_class", (q) => q.eq("classId", args.classId))
@@ -427,7 +427,7 @@ export const enroll = mutation({
   },
   returns: v.id("students"),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     const previousSchoolOther = args.previousSchoolOther?.trim() ?? "";
     if (args.previousSchoolAffiliation === "other" && !previousSchoolOther) {
       throw new Error("Enter the previous school affiliation");
@@ -695,7 +695,7 @@ export const enrollMany = mutation({
     failed: v.array(bulkFailureValidator),
   }),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     if (!isIsoDate(args.asOf)) {
       throw new ConvexError("Upload date must be YYYY-MM-DD");
     }
@@ -883,7 +883,7 @@ export const setStatus = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     const student = await ctx.db.get("students", args.studentId);
     if (!student) {
       throw new Error("Student not found");
@@ -972,7 +972,7 @@ export const exportRows = query({
   args: { asOf: v.string() },
   returns: v.array(exportRowValidator),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     if (!isIsoDate(args.asOf)) {
       throw new Error("Date must be YYYY-MM-DD");
     }
@@ -1059,7 +1059,7 @@ export const directory = query({
   },
   returns: v.array(directoryRowValidator),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     if (!isIsoDate(args.asOf)) {
       throw new Error("Date must be YYYY-MM-DD");
     }
@@ -1325,7 +1325,7 @@ export const profile = query({
   args: { studentId: v.id("students"), asOf: v.string() },
   returns: v.union(profileValidator, v.null()),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     if (!isIsoDate(args.asOf)) {
       throw new Error("Date must be YYYY-MM-DD");
     }
@@ -1421,7 +1421,7 @@ export const updateProfile = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin"]);
+    await requireSchoolAdmin(ctx);
     const student = await ctx.db.get("students", args.studentId);
     if (!student) {
       throw new Error("Student not found");

@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 import { classFormSchema, type ClassFormInput } from "@/lib/schemas";
 import { mutationResult } from "@/lib/result";
+import { isSchoolAdmin } from "@/lib/access";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -88,7 +89,9 @@ export default function ClassesPage() {
     }
   }, [open, form]);
 
-  if (me && me.role !== "super_admin") {
+  const canEdit = me?.role === "super_admin";
+
+  if (me && !isSchoolAdmin(me)) {
     return (
       <p className="text-sm text-muted-foreground">
         Only super admins can manage classes and fee structures.
@@ -144,10 +147,12 @@ export default function ClassesPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Classes</h1>
           <p className="text-sm text-muted-foreground">
-            Create classes and configure the standard fee structure.
+            {canEdit
+              ? "Create classes and configure the standard fee structure."
+              : "Class list and fee structures are view only."}
           </p>
         </div>
-        <Button onClick={openCreate}>Create class</Button>
+        {canEdit ? <Button onClick={openCreate}>Create class</Button> : null}
       </div>
 
       <Card>
@@ -173,7 +178,7 @@ export default function ClassesPage() {
                   <TableHead>Enrolled</TableHead>
                   <TableHead>Base tuition</TableHead>
                   <TableHead>Total class fee</TableHead>
-                  <TableHead />
+                  {canEdit ? <TableHead /> : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -192,36 +197,38 @@ export default function ClassesPage() {
                       <Badge variant="secondary">{classroom.tuitionCycle}</Badge>
                     </TableCell>
                     <TableCell>{money(classroom.totalClassFee)}</TableCell>
-                    <TableCell className="space-x-2 text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openEdit(classroom)}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={async () => {
-                          if (
-                            !window.confirm(
-                              `Delete ${classroom.name} ${classroom.section}?`,
-                            )
-                          ) {
-                            return;
-                          }
-                          try {
-                            await removeClass({ classId: classroom._id });
-                            toast.success("Class deleted");
-                          } catch (error) {
-                            toast.error(mutationResult(error).message);
-                          }
-                        }}
-                      >
-                        Delete
-                      </Button>
-                    </TableCell>
+                    {canEdit ? (
+                      <TableCell className="space-x-2 text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openEdit(classroom)}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={async () => {
+                            if (
+                              !window.confirm(
+                                `Delete ${classroom.name} ${classroom.section}?`,
+                              )
+                            ) {
+                              return;
+                            }
+                            try {
+                              await removeClass({ classId: classroom._id });
+                              toast.success("Class deleted");
+                            } catch (error) {
+                              toast.error(mutationResult(error).message);
+                            }
+                          }}
+                        >
+                          Delete
+                        </Button>
+                      </TableCell>
+                    ) : null}
                   </TableRow>
                 ))}
               </TableBody>

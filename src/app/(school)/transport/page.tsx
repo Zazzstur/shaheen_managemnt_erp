@@ -13,6 +13,7 @@ import {
   type TransportRouteInput,
 } from "@/lib/schemas";
 import { mutationResult } from "@/lib/result";
+import { isSchoolAdmin } from "@/lib/access";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -98,7 +99,7 @@ export default function TransportPage() {
     },
   });
 
-  if (me && me.role !== "super_admin") {
+  if (me && !isSchoolAdmin(me)) {
     return (
       <p className="text-sm text-muted-foreground">
         Only super admins can manage transport routes and fees.

@@ -1,11 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { Plus } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { toast } from "sonner";
 import { mutationResult } from "@/lib/result";
+import { isSchoolAdmin } from "@/lib/access";
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { SubjectField } from "@/components/subject-field";
 import {
@@ -42,12 +45,15 @@ export default function TimetablePage() {
     me?.role === "super_admin" || me?.role === "teacher" ? {} : "skip",
   );
   const [classId, setClassId] = useState<Id<"classes"> | "">("");
+  const [assistantOpen, setAssistantOpen] = useState<Record<string, boolean>>(
+    {},
+  );
   const slots = useQuery(
     api.timetables.listForClass,
     classId ? { classId } : "skip",
   );
   const upsertSlot = useMutation(api.timetables.upsertSlot);
-  const isAdmin = me?.role === "super_admin";
+  const isAdmin = me ? isSchoolAdmin(me) : false;
   const isTeacher = me?.role === "teacher";
   const mySlots = useQuery(api.timetables.listMine, isTeacher ? {} : "skip");
 
@@ -56,6 +62,7 @@ export default function TimetablePage() {
     periodNumber: number;
     subjectId: Id<"subjects">;
     teacherId?: Id<"users">;
+    assistantTeacherId?: Id<"users">;
   }) => {
     if (!classId) {
       toast.error("Select a class first");
@@ -67,6 +74,7 @@ export default function TimetablePage() {
       periodNumber: args.periodNumber,
       subjectId: args.subjectId,
       teacherId: args.teacherId,
+      assistantTeacherId: args.assistantTeacherId,
     });
   };
 
@@ -223,6 +231,11 @@ export default function TimetablePage() {
                                 <p className="text-muted-foreground">
                                   {assigned.teacherName}
                                 </p>
+                                {assigned.assistantTeacherName ? (
+                                  <p className="text-muted-foreground">
+                                    {assigned.assistantTeacherName}
+                                  </p>
+                                ) : null}
                               </div>
                             ) : (
                               <p className="text-muted-foreground">Free</p>
@@ -246,42 +259,117 @@ export default function TimetablePage() {
                                     }
                                   }}
                                 />
-                                <Select
-                                  value={assigned?.teacherId ?? null}
-                                  onValueChange={(teacherId) => {
-                                    if (!teacherId) return;
-                                    const subjectId =
-                                      assigned?.subjectId ?? subjects?.[0]?._id;
-                                    if (!subjectId) {
-                                      toast.error("Add a subject first");
-                                      return;
-                                    }
-                                    void assignSlot({
-                                      dayOfWeek: day,
-                                      periodNumber: period,
-                                      subjectId,
-                                      teacherId: teacherId as Id<"users">,
-                                    }).catch((error) =>
-                                      toast.error(mutationResult(error).message),
-                                    );
-                                  }}
-                                >
-                                  <SelectTrigger className="w-full">
-                                    <span className="flex flex-1 truncate text-left">
-                                      {assigned?.teacherName ?? "Teacher"}
-                                    </span>
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {(teachers ?? []).map((teacher) => (
-                                      <SelectItem
-                                        key={teacher._id}
-                                        value={teacher._id}
-                                      >
-                                        {teacher.name ?? teacher.email}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                <div className="flex items-center gap-1">
+                                  <Select
+                                    value={assigned?.teacherId ?? null}
+                                    onValueChange={(teacherId) => {
+                                      if (!teacherId) return;
+                                      const subjectId =
+                                        assigned?.subjectId ??
+                                        subjects?.[0]?._id;
+                                      if (!subjectId) {
+                                        toast.error("Add a subject first");
+                                        return;
+                                      }
+                                      void assignSlot({
+                                        dayOfWeek: day,
+                                        periodNumber: period,
+                                        subjectId,
+                                        teacherId: teacherId as Id<"users">,
+                                      }).catch((error) =>
+                                        toast.error(
+                                          mutationResult(error).message,
+                                        ),
+                                      );
+                                    }}
+                                  >
+                                    <SelectTrigger className="w-full">
+                                      <span className="flex flex-1 truncate text-left">
+                                        {assigned?.teacherName ?? "Teacher"}
+                                      </span>
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {(teachers ?? []).map((teacher) => (
+                                        <SelectItem
+                                          key={teacher._id}
+                                          value={teacher._id}
+                                        >
+                                          {teacher.name ?? teacher.email}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    aria-label="Add assistant teacher"
+                                    onClick={() => {
+                                      if (!assigned?.teacherId) {
+                                        toast.error(
+                                          "Choose the main teacher first",
+                                        );
+                                        return;
+                                      }
+                                      setAssistantOpen((open) => ({
+                                        ...open,
+                                        [`${day}-${period}`]: true,
+                                      }));
+                                    }}
+                                  >
+                                    <Plus />
+                                  </Button>
+                                </div>
+                                {assistantOpen[`${day}-${period}`] ||
+                                assigned?.assistantTeacherId ? (
+                                  <Select
+                                    value={assigned?.assistantTeacherId ?? null}
+                                    onValueChange={(assistantTeacherId) => {
+                                      if (!assistantTeacherId) return;
+                                      const subjectId = assigned?.subjectId;
+                                      if (!subjectId || !assigned?.teacherId) {
+                                        toast.error(
+                                          "Choose the main teacher first",
+                                        );
+                                        return;
+                                      }
+                                      void assignSlot({
+                                        dayOfWeek: day,
+                                        periodNumber: period,
+                                        subjectId,
+                                        teacherId: assigned.teacherId,
+                                        assistantTeacherId:
+                                          assistantTeacherId as Id<"users">,
+                                      }).catch((error) =>
+                                        toast.error(
+                                          mutationResult(error).message,
+                                        ),
+                                      );
+                                    }}
+                                  >
+                                    <SelectTrigger className="w-full">
+                                      <span className="flex flex-1 truncate text-left">
+                                        {assigned?.assistantTeacherName ??
+                                          "Assistant teacher"}
+                                      </span>
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {(teachers ?? [])
+                                        .filter(
+                                          (teacher) =>
+                                            teacher._id !== assigned?.teacherId,
+                                        )
+                                        .map((teacher) => (
+                                          <SelectItem
+                                            key={teacher._id}
+                                            value={teacher._id}
+                                          >
+                                            {teacher.name ?? teacher.email}
+                                          </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                  </Select>
+                                ) : null}
                               </div>
                             ) : null}
                           </td>

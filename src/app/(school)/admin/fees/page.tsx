@@ -8,6 +8,7 @@ import { Download } from "lucide-react";
 import { domToBlob } from "modern-screenshot";
 import { toast } from "sonner";
 import { mutationResult } from "@/lib/result";
+import { isSchoolAdmin } from "@/lib/access";
 import { downloadCsv } from "@/lib/downloadCsv";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -457,6 +458,8 @@ async function placeInvoiceInWhatsApp(phone: string, caption: string, file: File
 }
 
 function FeeInvoice({ paymentId }: { paymentId: Id<"feePayments"> }) {
+  const me = useQuery(api.users.me);
+  const canEditFees = me?.role === "super_admin";
   const invoice = useQuery(api.fees.paymentInvoice, { paymentId });
   const savedMessage = useQuery(api.fees.invoiceMessage);
   const setInvoiceMessage = useMutation(api.fees.setInvoiceMessage);
@@ -543,6 +546,9 @@ function FeeInvoice({ paymentId }: { paymentId: Id<"feePayments"> }) {
   }
 
   async function persistMessage(next: string) {
+    if (!canEditFees) {
+      return;
+    }
     const trimmed = next.trim().slice(0, 500);
     if (trimmed === savedMessage) {
       return;
@@ -753,8 +759,11 @@ function FeeInvoice({ paymentId }: { paymentId: Id<"feePayments"> }) {
           id="invoice-message"
           value={message}
           maxLength={500}
+          readOnly={!canEditFees}
           placeholder="This note is sent with every student's invoice until you change it."
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            if (canEditFees) setDraft(event.target.value);
+          }}
           onBlur={() => {
             void persistMessage(message).catch((error: unknown) => {
               toast.error(mutationResult(error).message);
@@ -945,7 +954,8 @@ export default function FeesPage() {
   } | null>(null);
   const [downloading, setDownloading] = useState(false);
   const trimmed = term.trim();
-  const isAdmin = me?.role === "super_admin";
+  const isAdmin = me ? isSchoolAdmin(me) : false;
+  const canCollect = me?.role === "super_admin";
   const idle = classId === "" && trimmed.length === 0;
   const filtering =
     classId !== "" || (feeStatus !== "all" && trimmed.length >= 1);
@@ -1126,7 +1136,7 @@ export default function FeesPage() {
       <StatementView
         key={statement.studentId}
         statement={statement}
-        canCollect
+        canCollect={canCollect}
         asOf={asOf}
       />
     )
@@ -1138,8 +1148,9 @@ export default function FeesPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Fees</h1>
           <p className="text-sm text-muted-foreground">
-            Search a student by name or admission number, then collect academic
-            fees and transport fees separately.
+            {canCollect
+              ? "Search a student by name or admission number, then collect academic fees and transport fees separately."
+              : "Fees are view only. Search a student to see academic and transport fees."}
           </p>
         </div>
         <Button

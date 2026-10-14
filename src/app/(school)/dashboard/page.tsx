@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "convex/react";
+import { isSchoolAdmin } from "@/lib/access";
 import { api } from "@convex/_generated/api";
 import Link from "next/link";
 import {
@@ -39,7 +40,8 @@ const LINKS = [
     href: "/teacher/attendance",
     title: "Attendance",
     description: "Mark a class present, absent, or late.",
-    roles: ["super_admin", "teacher"],
+    roles: ["teacher"],
+    staffRoles: ["class_teacher"],
   },
   {
     href: "/report-cards",
@@ -52,6 +54,12 @@ const LINKS = [
     title: "Timetable",
     description: "Weekly class schedule.",
     roles: ["super_admin", "teacher", "student", "parent"],
+  },
+  {
+    href: "/homework",
+    title: "Homework",
+    description: "Enter or review the day's homework by class and subject.",
+    roles: ["super_admin", "teacher"],
   },
   {
     href: "/admin/fees",
@@ -82,11 +90,20 @@ export default function DashboardPage() {
           Welcome{me.name ? `, ${me.name}` : ""}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Signed in as {me.role.replace("_", " ")}.
+          Signed in as{" "}
+          {me.staffRole === "data_entry"
+            ? "data entry"
+            : me.role.replace("_", " ")}
+          .
         </p>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
-        {LINKS.filter((link) => link.roles.includes(me.role)).map((link) => (
+        {LINKS.filter((link) => {
+          const role = isSchoolAdmin(me) ? "super_admin" : me.role;
+          if (!link.roles.includes(role)) return false;
+          if (!("staffRoles" in link)) return true;
+          return link.staffRoles.includes(me.staffRole as never);
+        }).map((link) => (
           <Link key={link.href} href={link.href}>
             <Card className="h-full transition-colors hover:bg-muted/40">
               <CardHeader>

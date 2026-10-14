@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
-import { Id } from "@convex/_generated/dataModel";
 import { toast } from "sonner";
 import { mutationResult } from "@/lib/result";
 import { Button } from "@/components/ui/button";
@@ -42,8 +41,13 @@ function todayIso() {
 }
 
 export default function AttendancePage() {
-  const classes = useQuery(api.catalog.listClasses);
-  const [classId, setClassId] = useState<Id<"classes"> | "">("");
+  const me = useQuery(api.users.me);
+  const classes = useQuery(
+    api.catalog.listClasses,
+    me?.staffRole === "class_teacher" && me.classId ? {} : "skip",
+  );
+  const classId = me?.staffRole === "class_teacher" ? me.classId : undefined;
+  const assignedClass = (classes ?? []).find((classroom) => classroom._id === classId);
   const [date, setDate] = useState(todayIso);
   const [marks, setMarks] = useState<Record<string, AttendanceStatus>>({});
   const roster = useQuery(
@@ -63,7 +67,7 @@ export default function AttendancePage() {
 
   const save = async () => {
     if (!classId) {
-      toast.error("Select a class");
+      toast.error("No class is assigned to this login");
       return;
     }
     setSaving(true);
@@ -84,47 +88,50 @@ export default function AttendancePage() {
     }
   };
 
+  if (me === undefined) {
+    return <p className="text-sm text-muted-foreground">Loading attendance…</p>;
+  }
+  if (me === null || me.staffRole !== "class_teacher") {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Only a class teacher can take attendance.
+      </p>
+    );
+  }
+  if (!classId) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        No class is assigned to this class teacher yet.
+      </p>
+    );
+  }
+
+  const classLabel = assignedClass
+    ? `${assignedClass.name} ${assignedClass.section}`.trim()
+    : "Assigned class";
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Attendance</h1>
         <p className="text-sm text-muted-foreground">
-          Select a class and mark present, absent, or late for the day.
+          Mark present, absent, or late for {classLabel}.
         </p>
       </div>
       <Card>
         <CardHeader>
           <CardTitle>Class roster</CardTitle>
-          <CardDescription>Changes save together as one batch.</CardDescription>
+          <CardDescription>
+            Attendance is saved for {classLabel} only.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-3">
             <div className="space-y-2">
               <Label>Class</Label>
-              <Select
-                value={classId || null}
-                items={Object.fromEntries(
-                  (classes ?? []).map((classroom) => [
-                    classroom._id,
-                    `${classroom.name} ${classroom.section}`.trim(),
-                  ]),
-                )}
-                onValueChange={(value) => {
-                  if (value) setClassId(value as Id<"classes">);
-                  setMarks({});
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select class" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(classes ?? []).map((classroom) => (
-                    <SelectItem key={classroom._id} value={classroom._id}>
-                      {classroom.name} {classroom.section}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <p className="flex h-8 items-center text-sm font-medium">
+                {classLabel}
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="date">Date</Label>

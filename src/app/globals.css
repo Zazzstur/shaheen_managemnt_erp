@@ -127,6 +127,17 @@
   html {
     @apply font-sans;
   }
+  .script-text {
+    font-family:
+      var(--font-hindi),
+      "Nirmala UI",
+      var(--font-urdu),
+      "Urdu Typesetting",
+      Aldhabi,
+      var(--font-geist-sans),
+      sans-serif;
+    line-height: 2;
+  }
 }
 
 @media print {

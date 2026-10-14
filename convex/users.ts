@@ -1,5 +1,5 @@
 import { paginationOptsValidator } from "convex/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { createAccount } from "@convex-dev/auth/server";
 import {
   action,
@@ -114,7 +114,7 @@ async function assertClassTeacherAvailable(
 ) {
   const classroom = await ctx.db.get("classes", classId);
   if (!classroom) {
-    throw new Error("Class not found");
+    throw new ConvexError("Class not found");
   }
   const holders = await ctx.db
     .query("users")
@@ -124,7 +124,7 @@ async function assertClassTeacherAvailable(
     (user) => user._id !== exceptUserId && user.staffRole === "class_teacher",
   );
   if (taken) {
-    throw new Error("That class already has a class teacher");
+    throw new ConvexError("That class already has a class teacher");
   }
 }
 
@@ -139,21 +139,32 @@ export const setStaffRole = mutation({
     await requireSuperAdmin(ctx);
     const target = await ctx.db.get("users", args.userId);
     if (!target) {
-      throw new Error("User not found");
+      throw new ConvexError("User not found");
     }
     if (target.role !== "teacher") {
-      throw new Error("Staff roles can only be assigned to teacher logins");
+      throw new ConvexError("Staff roles can only be assigned to teacher logins");
     }
     if (args.staffRole !== "class_teacher") {
+      if (target.classId === undefined) {
+        await ctx.db.patch("users", args.userId, {
+          staffRole: args.staffRole,
+        });
+      } else {
+        const { _id, _creationTime, classId: _classId, ...rest } = target;
+        await ctx.db.replace("users", args.userId, {
+          ...rest,
+          staffRole: args.staffRole,
+        });
+      }
+      return null;
+    }
+    if (!args.classId) {
       await ctx.db.patch("users", args.userId, {
-        staffRole: args.staffRole,
-        classId: undefined,
+        staffRole: "class_teacher",
       });
       return null;
     }
-    if (args.classId) {
-      await assertClassTeacherAvailable(ctx, args.classId, args.userId);
-    }
+    await assertClassTeacherAvailable(ctx, args.classId, args.userId);
     await ctx.db.patch("users", args.userId, {
       staffRole: "class_teacher",
       classId: args.classId,

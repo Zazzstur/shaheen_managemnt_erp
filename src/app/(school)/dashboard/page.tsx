@@ -101,7 +101,7 @@ export default function DashboardPage() {
         {LINKS.filter((link) => {
           const role = isSchoolAdmin(me) ? "super_admin" : me.role;
           if (!link.roles.includes(role)) return false;
-          if (!("staffRoles" in link)) return true;
+          if (!link.staffRoles) return true;
           return link.staffRoles.includes(me.staffRole as never);
         }).map((link) => (
           <Link key={link.href} href={link.href}>

@@ -194,4 +194,19 @@ export default defineSchema({
   })
     .index("by_student", ["studentId"])
     .index("by_route", ["routeId"]),
+
+  teacherAbsences: defineTable({
+    date: v.string(),
+    teacherId: v.id("users"),
+  })
+    .index("by_date", ["date"])
+    .index("by_date_and_teacher", ["date", "teacherId"]),
+
+  freeClassCovers: defineTable({
+    date: v.string(),
+    timetableId: v.id("timetables"),
+    coverTeacherId: v.id("users"),
+  })
+    .index("by_date", ["date"])
+    .index("by_date_and_slot", ["date", "timetableId"]),
 });

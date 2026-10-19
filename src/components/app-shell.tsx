@@ -8,6 +8,7 @@ import { usePathname } from "next/navigation";
 import {
   Bus,
   CalendarDays,
+  CalendarOff,
   ClipboardCheck,
   ContactRound,
   FileText,
@@ -72,6 +73,12 @@ const NAV = [
     href: "/admin/users",
     label: "Teachers",
     icon: Users,
+    roles: ["super_admin"],
+  },
+  {
+    href: "/admin/free-classes",
+    label: "Free classes",
+    icon: CalendarOff,
     roles: ["super_admin"],
   },
   {

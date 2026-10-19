@@ -160,6 +160,7 @@ export const upsertSlot = mutation({
     subjectId: v.id("subjects"),
     teacherId: v.optional(v.id("users")),
     assistantTeacherId: v.optional(v.id("users")),
+    clearAssistantTeacher: v.optional(v.boolean()),
   },
   returns: v.id("timetables"),
   handler: async (ctx, args) => {
@@ -202,9 +203,11 @@ export const upsertSlot = mutation({
       await ctx.db.patch("timetables", existing._id, {
         subjectId: args.subjectId,
         ...(args.teacherId ? { teacherId: args.teacherId } : {}),
-        ...(args.assistantTeacherId
-          ? { assistantTeacherId: args.assistantTeacherId }
-          : {}),
+        ...(args.clearAssistantTeacher
+          ? { assistantTeacherId: undefined }
+          : args.assistantTeacherId
+            ? { assistantTeacherId: args.assistantTeacherId }
+            : {}),
       });
       return existing._id;
     }

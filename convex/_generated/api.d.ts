@@ -14,6 +14,7 @@ import type * as catalog from "../catalog.js";
 import type * as classes from "../classes.js";
 import type * as exams from "../exams.js";
 import type * as fees from "../fees.js";
+import type * as freeClasses from "../freeClasses.js";
 import type * as homework from "../homework.js";
 import type * as http from "../http.js";
 import type * as lib_auth from "../lib/auth.js";
@@ -41,6 +42,7 @@ declare const fullApi: ApiFromModules<{
   classes: typeof classes;
   exams: typeof exams;
   fees: typeof fees;
+  freeClasses: typeof freeClasses;
   homework: typeof homework;
   http: typeof http;
   "lib/auth": typeof lib_auth;

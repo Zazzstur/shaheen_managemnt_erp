@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import { Minus, Plus } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
@@ -10,6 +10,8 @@ import { mutationResult } from "@/lib/result";
 import { isSchoolAdmin } from "@/lib/access";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { PersonField } from "@/components/person-field";
+import { PickerGroup } from "@/components/picker-group";
 import { SubjectField } from "@/components/subject-field";
 import {
   Card,
@@ -63,6 +65,7 @@ export default function TimetablePage() {
     subjectId: Id<"subjects">;
     teacherId?: Id<"users">;
     assistantTeacherId?: Id<"users">;
+    clearAssistantTeacher?: boolean;
   }) => {
     if (!classId) {
       toast.error("Select a class first");
@@ -74,7 +77,10 @@ export default function TimetablePage() {
       periodNumber: args.periodNumber,
       subjectId: args.subjectId,
       teacherId: args.teacherId,
-      assistantTeacherId: args.assistantTeacherId,
+      ...(args.assistantTeacherId
+        ? { assistantTeacherId: args.assistantTeacherId }
+        : {}),
+      ...(args.clearAssistantTeacher ? { clearAssistantTeacher: true } : {}),
     });
   };
 
@@ -200,6 +206,7 @@ export default function TimetablePage() {
           ) : slots === undefined ? (
             <p className="text-sm text-muted-foreground">Loading timetable…</p>
           ) : (
+            <PickerGroup>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] border-collapse text-sm">
                 <thead>
@@ -260,45 +267,49 @@ export default function TimetablePage() {
                                   }}
                                 />
                                 <div className="flex items-center gap-1">
-                                  <Select
-                                    value={assigned?.teacherId ?? null}
-                                    onValueChange={(teacherId) => {
-                                      if (!teacherId) return;
-                                      const subjectId =
-                                        assigned?.subjectId ??
-                                        subjects?.[0]?._id;
-                                      if (!subjectId) {
-                                        toast.error("Add a subject first");
-                                        return;
-                                      }
-                                      void assignSlot({
-                                        dayOfWeek: day,
-                                        periodNumber: period,
-                                        subjectId,
-                                        teacherId: teacherId as Id<"users">,
-                                      }).catch((error) =>
-                                        toast.error(
-                                          mutationResult(error).message,
-                                        ),
-                                      );
-                                    }}
-                                  >
-                                    <SelectTrigger className="w-full">
-                                      <span className="flex flex-1 truncate text-left">
-                                        {assigned?.teacherName ?? "Teacher"}
-                                      </span>
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {(teachers ?? []).map((teacher) => (
-                                        <SelectItem
-                                          key={teacher._id}
-                                          value={teacher._id}
-                                        >
-                                          {teacher.name ?? teacher.email}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
+                                  <div className="min-w-0 flex-1">
+                                    <PersonField
+                                      people={(teachers ?? []).map(
+                                        (teacher) => ({
+                                          id: teacher._id,
+                                          label:
+                                            teacher.name ??
+                                            teacher.email ??
+                                            "Unnamed",
+                                          searchText: [
+                                            teacher.name,
+                                            teacher.email,
+                                          ]
+                                            .filter(Boolean)
+                                            .join(" "),
+                                        }),
+                                      )}
+                                      selectedId={assigned?.teacherId}
+                                      selectedLabel={assigned?.teacherName}
+                                      placeholder="Teacher"
+                                      searchPlaceholder="Search teachers"
+                                      listLabel="Teachers"
+                                      onSelect={(teacherId) => {
+                                        const subjectId =
+                                          assigned?.subjectId ??
+                                          subjects?.[0]?._id;
+                                        if (!subjectId) {
+                                          toast.error("Add a subject first");
+                                          return;
+                                        }
+                                        void assignSlot({
+                                          dayOfWeek: day,
+                                          periodNumber: period,
+                                          subjectId,
+                                          teacherId: teacherId as Id<"users">,
+                                        }).catch((error) =>
+                                          toast.error(
+                                            mutationResult(error).message,
+                                          ),
+                                        );
+                                      }}
+                                    />
+                                  </div>
                                   <Button
                                     type="button"
                                     variant="outline"
@@ -322,53 +333,97 @@ export default function TimetablePage() {
                                 </div>
                                 {assistantOpen[`${day}-${period}`] ||
                                 assigned?.assistantTeacherId ? (
-                                  <Select
-                                    value={assigned?.assistantTeacherId ?? null}
-                                    onValueChange={(assistantTeacherId) => {
-                                      if (!assistantTeacherId) return;
-                                      const subjectId = assigned?.subjectId;
-                                      if (!subjectId || !assigned?.teacherId) {
-                                        toast.error(
-                                          "Choose the main teacher first",
+                                  <div className="flex items-center gap-1">
+                                    <div className="min-w-0 flex-1">
+                                      <PersonField
+                                        people={(teachers ?? [])
+                                          .filter(
+                                            (teacher) =>
+                                              teacher._id !==
+                                              assigned?.teacherId,
+                                          )
+                                          .map((teacher) => ({
+                                            id: teacher._id,
+                                            label:
+                                              teacher.name ??
+                                              teacher.email ??
+                                              "Unnamed",
+                                            searchText: [
+                                              teacher.name,
+                                              teacher.email,
+                                            ]
+                                              .filter(Boolean)
+                                              .join(" "),
+                                          }))}
+                                        selectedId={
+                                          assigned?.assistantTeacherId
+                                        }
+                                        selectedLabel={
+                                          assigned?.assistantTeacherName
+                                        }
+                                        placeholder="Assistant teacher"
+                                        searchPlaceholder="Search assistant teachers"
+                                        listLabel="Assistant teachers"
+                                        onSelect={(assistantTeacherId) => {
+                                          const subjectId =
+                                            assigned?.subjectId;
+                                          if (
+                                            !subjectId ||
+                                            !assigned?.teacherId
+                                          ) {
+                                            toast.error(
+                                              "Choose the main teacher first",
+                                            );
+                                            return;
+                                          }
+                                          void assignSlot({
+                                            dayOfWeek: day,
+                                            periodNumber: period,
+                                            subjectId,
+                                            teacherId: assigned.teacherId,
+                                            assistantTeacherId:
+                                              assistantTeacherId as Id<"users">,
+                                          }).catch((error) =>
+                                            toast.error(
+                                              mutationResult(error).message,
+                                            ),
+                                          );
+                                        }}
+                                      />
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="icon"
+                                      aria-label="Remove assistant teacher"
+                                      onClick={() => {
+                                        const key = `${day}-${period}`;
+                                        setAssistantOpen((open) => ({
+                                          ...open,
+                                          [key]: false,
+                                        }));
+                                        if (
+                                          !assigned?.assistantTeacherId ||
+                                          !assigned.subjectId
+                                        ) {
+                                          return;
+                                        }
+                                        void assignSlot({
+                                          dayOfWeek: day,
+                                          periodNumber: period,
+                                          subjectId: assigned.subjectId,
+                                          teacherId: assigned.teacherId,
+                                          clearAssistantTeacher: true,
+                                        }).catch((error) =>
+                                          toast.error(
+                                            mutationResult(error).message,
+                                          ),
                                         );
-                                        return;
-                                      }
-                                      void assignSlot({
-                                        dayOfWeek: day,
-                                        periodNumber: period,
-                                        subjectId,
-                                        teacherId: assigned.teacherId,
-                                        assistantTeacherId:
-                                          assistantTeacherId as Id<"users">,
-                                      }).catch((error) =>
-                                        toast.error(
-                                          mutationResult(error).message,
-                                        ),
-                                      );
-                                    }}
-                                  >
-                                    <SelectTrigger className="w-full">
-                                      <span className="flex flex-1 truncate text-left">
-                                        {assigned?.assistantTeacherName ??
-                                          "Assistant teacher"}
-                                      </span>
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {(teachers ?? [])
-                                        .filter(
-                                          (teacher) =>
-                                            teacher._id !== assigned?.teacherId,
-                                        )
-                                        .map((teacher) => (
-                                          <SelectItem
-                                            key={teacher._id}
-                                            value={teacher._id}
-                                          >
-                                            {teacher.name ?? teacher.email}
-                                          </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                  </Select>
+                                      }}
+                                    >
+                                      <Minus />
+                                    </Button>
+                                  </div>
                                 ) : null}
                               </div>
                             ) : null}
@@ -380,6 +435,7 @@ export default function TimetablePage() {
                 </tbody>
               </table>
             </div>
+            </PickerGroup>
           )}
         </CardContent>
       </Card>

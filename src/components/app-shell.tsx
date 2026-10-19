@@ -169,9 +169,16 @@ function SidebarBody() {
   return (
     <div className="flex h-full flex-col gap-4">
       <div>
-        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          School Management
-        </p>
+        <div className="flex items-center gap-2">
+          <img
+            src="/shaheen-academy-logo.svg"
+            alt=""
+            className="h-8 w-auto shrink-0"
+          />
+          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            SACH
+          </p>
+        </div>
         <p className="mt-2 font-medium">{user.name ?? user.email}</p>
         <Badge className="mt-2" variant="secondary">
           {user.staffRole === "data_entry"
@@ -233,7 +240,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <SidebarBody />
                 </SheetContent>
               </Sheet>
-              <span className="font-medium">School Management</span>
+              <img
+                src="/shaheen-academy-logo.svg"
+                alt=""
+                className="h-8 w-auto shrink-0"
+              />
+              <span className="font-medium">SACH</span>
             </header>
             <main className="flex-1 p-4 md:p-8 print:p-0">{children}</main>
           </div>

@@ -29,8 +29,12 @@ const urdu = Noto_Nastaliq_Urdu({
 });
 
 export const metadata: Metadata = {
-  title: "School Management",
+  title: "SACH",
   description: "Admissions, attendance, timetable, and fees",
+  icons: {
+    icon: "/shaheen-academy-logo.png",
+    apple: "/shaheen-academy-logo.png",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

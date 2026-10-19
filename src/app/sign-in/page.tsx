@@ -72,8 +72,13 @@ export default function SignInPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
       <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>School Management</CardTitle>
+        <CardHeader className="justify-items-center text-center">
+          <img
+            src="/shaheen-academy-logo.svg"
+            alt=""
+            className="h-16 w-auto"
+          />
+          <CardTitle>SACH</CardTitle>
           <CardDescription>
             The first account created becomes super admin. Later sign-ups use
             the selected role.

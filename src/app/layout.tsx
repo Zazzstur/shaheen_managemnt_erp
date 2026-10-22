@@ -31,9 +31,18 @@ const urdu = Noto_Nastaliq_Urdu({
 export const metadata: Metadata = {
   title: "SACH",
   description: "Admissions, attendance, timetable, and fees",
+  applicationName: "SACH",
+  appleWebApp: {
+    capable: true,
+    title: "SACH",
+    statusBarStyle: "default",
+  },
   icons: {
-    icon: "/shaheen-academy-logo.png",
-    apple: "/shaheen-academy-logo.png",
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
 };
 

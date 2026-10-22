@@ -13,7 +13,7 @@ import { downloadCsv } from "@/lib/downloadCsv";
 import {
   downloadBlob,
   isLocalSchoolComputer,
-  openBrowserTab,
+  openWhatsAppApp,
   shareImageFromBrowser,
 } from "@/lib/share-whatsapp";
 import { Button } from "@/components/ui/button";
@@ -600,7 +600,7 @@ function FeeInvoice({ paymentId }: { paymentId: Id<"feePayments"> }) {
                   if (result.opened) {
                     downloadBlob(file, file.name);
                   } else {
-                    openBrowserTab(result.webUrl);
+                    openWhatsAppApp(result.webUrl);
                   }
                 },
               },
@@ -618,7 +618,7 @@ function FeeInvoice({ paymentId }: { paymentId: Id<"feePayments"> }) {
                 action: {
                   label: "Open WhatsApp",
                   onClick: () => {
-                    openBrowserTab(result.webUrl);
+                    openWhatsAppApp(result.webUrl);
                   },
                 },
               },

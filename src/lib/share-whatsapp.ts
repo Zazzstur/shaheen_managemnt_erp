@@ -3,12 +3,16 @@ export function isLocalSchoolComputer() {
   return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
 }
 
-export function whatsAppChatUrl(phone: string, text: string) {
-  const url = new URL(phone ? `https://wa.me/${phone}` : "https://wa.me/");
-  if (text) {
-    url.searchParams.set("text", text);
+export function whatsAppAppUrl(phone: string, text: string) {
+  const params = new URLSearchParams();
+  if (phone) {
+    params.set("phone", phone);
   }
-  return url.toString();
+  if (text) {
+    params.set("text", text);
+  }
+  const query = params.toString();
+  return `whatsapp://send${query ? `?${query}` : ""}`;
 }
 
 const maxClipboardEdge = 1600;
@@ -74,12 +78,13 @@ export function downloadBlob(file: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 }
 
-export function openBrowserTab(url: string) {
-  const popup = window.open(url, "_blank");
-  if (popup) {
-    popup.opener = null;
-  }
-  return popup !== null;
+export function openWhatsAppApp(url: string) {
+  const link = document.createElement("a");
+  link.href = url;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  return true;
 }
 
 export type LiveWhatsAppShare = {
@@ -95,10 +100,10 @@ export function shareImageFromBrowser(
 ): Promise<LiveWhatsAppShare> {
   const phone = options.phone || "";
   const text = options.text ?? "";
-  const webUrl = whatsAppChatUrl(phone, text);
+  const webUrl = whatsAppAppUrl(phone, text);
   const copiedPromise = copyPngToClipboard(file);
   return copiedPromise.then((copied) => {
-    const opened = openBrowserTab(webUrl);
+    const opened = openWhatsAppApp(webUrl);
     return {
       mode: "browser" as const,
       copied,

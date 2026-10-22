@@ -11,7 +11,7 @@ import { mutationResult } from "@/lib/result";
 import {
   downloadBlob,
   isLocalSchoolComputer,
-  openBrowserTab,
+  openWhatsAppApp,
   prepareClipboardPng,
   shareImageFromBrowser,
 } from "@/lib/share-whatsapp";
@@ -281,7 +281,7 @@ export default function HomeworkPage() {
                     if (result.opened) {
                       downloadBlob(file, "homework.png");
                     } else {
-                      openBrowserTab(result.webUrl);
+                      openWhatsAppApp(result.webUrl);
                     }
                   },
                 },
@@ -299,7 +299,7 @@ export default function HomeworkPage() {
                   action: {
                     label: "Open WhatsApp",
                     onClick: () => {
-                      openBrowserTab(result.webUrl);
+                      openWhatsAppApp(result.webUrl);
                     },
                   },
                 },

@@ -264,13 +264,6 @@ export default function HomeworkPage() {
       setSharing(true);
       void shareImageFromBrowser(file, { text: `${classLabel} homework` })
         .then((result) => {
-          if (result.mode === "cancelled") {
-            return;
-          }
-          if (result.mode === "shared") {
-            toast.message("Send the homework photo in WhatsApp.");
-            return;
-          }
           if (!result.copied) {
             toast.message(
               result.opened
@@ -292,7 +285,19 @@ export default function HomeworkPage() {
             return;
           }
           toast.message(
-            "WhatsApp is open. Choose the person or group, paste the homework photo, then send.",
+            result.opened
+              ? "The homework photo is copied. Choose the person or group in WhatsApp, press Ctrl+V, then send."
+              : "The homework photo is copied. Open WhatsApp, choose the person or group, press Ctrl+V, then send.",
+            result.opened
+              ? undefined
+              : {
+                  action: {
+                    label: "Open WhatsApp",
+                    onClick: () => {
+                      openBrowserTab(result.webUrl);
+                    },
+                  },
+                },
           );
         })
         .finally(() => {

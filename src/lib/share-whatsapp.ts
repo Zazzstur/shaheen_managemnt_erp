@@ -15,12 +15,19 @@ export function copyPngToClipboard(file: Blob) {
   if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
     return Promise.resolve(false);
   }
-  const png =
-    file.type === "image/png" ? file : new Blob([file], { type: "image/png" });
-  return navigator.clipboard
-    .write([new ClipboardItem({ "image/png": png })])
-    .then(() => true)
-    .catch(() => false);
+  // Pass a promise so the write stays tied to this click. Awaiting the bytes
+  // first, or opening WhatsApp first, makes the browser reject the copy.
+  const pngPromise = file.arrayBuffer().then(
+    (bytes) => new Blob([bytes], { type: "image/png" }),
+  );
+  try {
+    return navigator.clipboard
+      .write([new ClipboardItem({ "image/png": pngPromise })])
+      .then(() => true)
+      .catch(() => false);
+  } catch {
+    return Promise.resolve(false);
+  }
 }
 
 export function downloadBlob(file: Blob, filename: string) {
@@ -40,10 +47,12 @@ export function openBrowserTab(url: string) {
   return popup !== null;
 }
 
-export type LiveWhatsAppShare =
-  | { mode: "shared" }
-  | { mode: "cancelled" }
-  | { mode: "browser"; copied: boolean; opened: boolean; webUrl: string };
+export type LiveWhatsAppShare = {
+  mode: "browser";
+  copied: boolean;
+  opened: boolean;
+  webUrl: string;
+};
 
 export function shareImageFromBrowser(
   file: File,
@@ -52,32 +61,14 @@ export function shareImageFromBrowser(
   const phone = options.phone || "";
   const text = options.text ?? "";
   const webUrl = whatsAppChatUrl(phone, text);
-  const coarse = window.matchMedia("(pointer: coarse)").matches;
-
-  if (
-    coarse &&
-    !phone &&
-    typeof navigator.share === "function" &&
-    navigator.canShare?.({ files: [file] })
-  ) {
-    return navigator
-      .share({ files: [file], title: "Homework", text: text || undefined })
-      .then(() => ({ mode: "shared" as const }))
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return { mode: "cancelled" as const };
-        }
-        const opened = openBrowserTab(webUrl);
-        return { mode: "browser" as const, copied: false, opened, webUrl };
-      });
-  }
-
-  const opened = openBrowserTab(webUrl);
   const copiedPromise = copyPngToClipboard(file);
-  return copiedPromise.then((copied) => ({
-    mode: "browser" as const,
-    copied,
-    opened,
-    webUrl,
-  }));
+  return copiedPromise.then((copied) => {
+    const opened = openBrowserTab(webUrl);
+    return {
+      mode: "browser" as const,
+      copied,
+      opened,
+      webUrl,
+    };
+  });
 }

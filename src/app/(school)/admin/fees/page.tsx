@@ -588,9 +588,6 @@ function FeeInvoice({ paymentId }: { paymentId: Id<"feePayments"> }) {
           phone: number,
           text: caption,
         });
-        if (result.mode === "cancelled" || result.mode === "shared") {
-          return;
-        }
         if (!result.copied) {
           toast.message(
             result.opened
@@ -612,7 +609,19 @@ function FeeInvoice({ paymentId }: { paymentId: Id<"feePayments"> }) {
           return;
         }
         toast.message(
-          "WhatsApp is open on that number, with your message. Paste the invoice photo into that chat, then send.",
+          result.opened
+            ? "The invoice photo is copied. WhatsApp is open on that number. Press Ctrl+V, then send."
+            : "The invoice photo is copied. Open WhatsApp and press Ctrl+V, then send.",
+          result.opened
+            ? undefined
+            : {
+                action: {
+                  label: "Open WhatsApp",
+                  onClick: () => {
+                    openBrowserTab(result.webUrl);
+                  },
+                },
+              },
         );
       } finally {
         sharingRef.current = false;

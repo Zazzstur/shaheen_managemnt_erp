@@ -8,6 +8,12 @@ import { Id } from "@convex/_generated/dataModel";
 import { Share2 } from "lucide-react";
 import { toast } from "sonner";
 import { mutationResult } from "@/lib/result";
+import {
+  downloadBlob,
+  isLocalSchoolComputer,
+  openBrowserTab,
+  shareImageFromBrowser,
+} from "@/lib/share-whatsapp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -102,11 +108,38 @@ async function placeHomeworkPhoto(file: File) {
   }
 }
 
-type HomeworkCapture = {
+function HomeworkSheet({
+  classLabel,
+  dateLabel,
+  rows,
+}: {
   classLabel: string;
   dateLabel: string;
   rows: HomeworkRow[];
-};
+}) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-xs font-medium tracking-wide text-neutral-500 uppercase">
+          Homework
+        </p>
+        <p className="text-2xl font-semibold">{classLabel}</p>
+        <p className="text-sm text-neutral-600">{dateLabel}</p>
+      </div>
+      {rows.map((row) => (
+        <div key={rowKey(row)} className="border-t border-neutral-200 pt-3">
+          <p className="text-xs font-medium tracking-wide text-neutral-500 uppercase">
+            Period {row.periodNumber}
+          </p>
+          <p className="font-semibold">{row.subjectName}</p>
+          <p className="script-text mt-1 text-sm whitespace-pre-wrap" dir="auto">
+            {row.message.trim() || "No homework entered."}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function HomeworkPage() {
   const me = useQuery(api.users.me);
@@ -119,8 +152,10 @@ export default function HomeworkPage() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [savingKey, setSavingKey] = useState("");
   const [sharing, setSharing] = useState(false);
-  const [capture, setCapture] = useState<HomeworkCapture | null>(null);
-  const sheetRef = useRef<HTMLDivElement>(null);
+  const [readyIds, setReadyIds] = useState<string[]>([]);
+  const sheetRefs = useRef(new Map<string, HTMLDivElement>());
+  const photosRef = useRef(new Map<string, File>());
+  const groupsRef = useRef<Array<{ classLabel: string; rows: HomeworkRow[] }>>([]);
   const sunday = isSunday(date);
   const isSuperAdmin = me?.role === "super_admin";
   const canEnter = me?.role === "teacher";
@@ -159,66 +194,127 @@ export default function HomeworkPage() {
     }
     return [...grouped.values()];
   }, [rows]);
+  const shareSignature = isSuperAdmin
+    ? groups
+        .map((group) =>
+          [
+            group.rows[0]?.classId ?? "",
+            formatShareDate(date),
+            ...group.rows.map((row) => `${rowKey(row)}:${row.message}`),
+          ].join("~"),
+        )
+        .join("||")
+    : "";
+
+  groupsRef.current = groups;
 
   useEffect(() => {
-    if (!capture) {
+    if (!isSuperAdmin || !shareSignature) {
       return;
     }
-    const sheet = sheetRef.current;
-    if (!sheet) {
-      return;
-    }
+    const shareGroups = groupsRef.current;
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      void domToBlob(sheet, {
-        backgroundColor: "#FDFBF3",
-        scale: 2,
-      })
-        .then(async (blob) => {
-          if (cancelled) {
-            return;
+      void (async () => {
+        const ready: string[] = [];
+        for (const group of shareGroups) {
+          const id = group.rows[0]?.classId;
+          const node = id ? sheetRefs.current.get(id) : undefined;
+          if (!id || !node) {
+            continue;
           }
-          const file = new File([blob], "homework.png", { type: "image/png" });
-          const opened = await placeHomeworkPhoto(file);
-          if (cancelled) {
-            return;
+          try {
+            const blob = await domToBlob(node, {
+              backgroundColor: "#FDFBF3",
+              scale: 2,
+            });
+            if (cancelled) {
+              return;
+            }
+            photosRef.current.set(
+              id,
+              new File([blob], "homework.png", { type: "image/png" }),
+            );
+            ready.push(id);
+          } catch {
+            if (!cancelled) {
+              toast.error("Could not create the homework photo");
+            }
           }
-          if (!opened) {
-            const appLink = document.createElement("a");
-            appLink.href = "whatsapp://";
-            appLink.click();
-          }
-          toast.message(
-            "WhatsApp is open. Choose the person or group. If the homework photo is not attached, press Ctrl+V, then send.",
-          );
-        })
-        .catch(() => {
-          if (!cancelled) {
-            toast.error("Could not create the homework photo");
-          }
-        })
-        .finally(() => {
-          if (!cancelled) {
-            setSharing(false);
-          }
-        });
+        }
+        if (!cancelled) {
+          setReadyIds(ready);
+        }
+      })();
     }, 80);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      photosRef.current.clear();
+      setReadyIds([]);
     };
-  }, [capture]);
+  }, [isSuperAdmin, shareSignature]);
 
-  function onShare(classLabel: string, rows: HomeworkRow[]) {
-    if (sharing) {
+  function onShare(classLabel: string, classId: string) {
+    const file = photosRef.current.get(classId);
+    if (!file || sharing) {
+      return;
+    }
+    if (!isLocalSchoolComputer()) {
+      setSharing(true);
+      void shareImageFromBrowser(file, { text: `${classLabel} homework` })
+        .then((result) => {
+          if (result.mode === "cancelled") {
+            return;
+          }
+          if (result.mode === "shared") {
+            toast.message("Send the homework photo in WhatsApp.");
+            return;
+          }
+          if (!result.copied) {
+            toast.message(
+              result.opened
+                ? "WhatsApp is open. Attach the homework photo, then send."
+                : "The browser blocked WhatsApp. Allow pop-ups, then try again.",
+              {
+                action: {
+                  label: result.opened ? "Download photo" : "Open WhatsApp",
+                  onClick: () => {
+                    if (result.opened) {
+                      downloadBlob(file, "homework.png");
+                    } else {
+                      openBrowserTab(result.webUrl);
+                    }
+                  },
+                },
+              },
+            );
+            return;
+          }
+          toast.message(
+            "WhatsApp is open. Choose the person or group, paste the homework photo, then send.",
+          );
+        })
+        .finally(() => {
+          setSharing(false);
+        });
       return;
     }
     setSharing(true);
-    setCapture({
-      classLabel,
-      dateLabel: formatShareDate(date),
-      rows,
-    });
+    void placeHomeworkPhoto(file)
+      .then((opened) => {
+        if (!opened) {
+          const appLink = document.createElement("a");
+          appLink.href = "whatsapp://";
+          appLink.click();
+        }
+        toast.message(
+          "WhatsApp is open. Choose the person or group. If the homework photo is not attached, press Ctrl+V, then send.",
+        );
+      })
+      .finally(() => {
+        setSharing(false);
+      });
   }
 
   async function onSave(row: HomeworkRow) {
@@ -350,11 +446,19 @@ export default function HomeworkPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={sharing}
-                    onClick={() => onShare(group.classLabel, group.rows)}
+                    disabled={
+                      sharing || !readyIds.includes(group.rows[0]?.classId ?? "")
+                    }
+                    onClick={() =>
+                      onShare(group.classLabel, group.rows[0]?.classId ?? "")
+                    }
                   >
                     <Share2 />
-                    {sharing ? "Sharing…" : "Share"}
+                    {sharing
+                      ? "Sharing…"
+                      : readyIds.includes(group.rows[0]?.classId ?? "")
+                        ? "Share"
+                        : "Preparing photo…"}
                   </Button>
                 </CardAction>
               ) : null}
@@ -439,37 +543,35 @@ export default function HomeworkPage() {
           </Card>
         ))
       )}
-      <div
-        ref={sheetRef}
-        aria-hidden
-        className="pointer-events-none fixed top-0 left-[-1400px] w-[640px] bg-[#FDFBF3] p-8 text-neutral-900"
-      >
-        {capture ? (
-          <div className="space-y-4">
-            <div>
-              <p className="text-xs font-medium tracking-wide text-neutral-500 uppercase">
-                Homework
-              </p>
-              <p className="text-2xl font-semibold">{capture.classLabel}</p>
-              <p className="text-sm text-neutral-600">{capture.dateLabel}</p>
-            </div>
-            {capture.rows.map((row) => (
+      {isSuperAdmin
+        ? groups.map((group, index) => {
+            const id = group.rows[0]?.classId;
+            if (!id) {
+              return null;
+            }
+            return (
               <div
-                key={rowKey(row)}
-                className="border-t border-neutral-200 pt-3"
+                key={id}
+                ref={(node) => {
+                  if (node) {
+                    sheetRefs.current.set(id, node);
+                  } else {
+                    sheetRefs.current.delete(id);
+                  }
+                }}
+                aria-hidden
+                className="pointer-events-none fixed left-[-1400px] w-[640px] bg-[#FDFBF3] p-8 text-neutral-900"
+                style={{ top: index * 2400 }}
               >
-                <p className="text-xs font-medium tracking-wide text-neutral-500 uppercase">
-                  Period {row.periodNumber}
-                </p>
-                <p className="font-semibold">{row.subjectName}</p>
-                <p className="script-text mt-1 text-sm whitespace-pre-wrap" dir="auto">
-                  {row.message.trim() || "No homework entered."}
-                </p>
+                <HomeworkSheet
+                  classLabel={group.classLabel}
+                  dateLabel={formatShareDate(date)}
+                  rows={group.rows}
+                />
               </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
+            );
+          })
+        : null}
     </div>
   );
 }

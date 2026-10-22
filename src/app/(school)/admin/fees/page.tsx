@@ -10,6 +10,12 @@ import { toast } from "sonner";
 import { mutationResult } from "@/lib/result";
 import { isSchoolAdmin } from "@/lib/access";
 import { downloadCsv } from "@/lib/downloadCsv";
+import {
+  downloadBlob,
+  isLocalSchoolComputer,
+  openBrowserTab,
+  shareImageFromBrowser,
+} from "@/lib/share-whatsapp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -576,6 +582,44 @@ function FeeInvoice({ paymentId }: { paymentId: Id<"feePayments"> }) {
       toast.error(mutationResult(error).message);
     });
     const caption = message.trim();
+    if (!isLocalSchoolComputer()) {
+      try {
+        const result = await shareImageFromBrowser(file, {
+          phone: number,
+          text: caption,
+        });
+        if (result.mode === "cancelled" || result.mode === "shared") {
+          return;
+        }
+        if (!result.copied) {
+          toast.message(
+            result.opened
+              ? "WhatsApp is open with your message. Attach the invoice photo in that chat."
+              : "The browser blocked the WhatsApp window. Allow pop-ups, then try again.",
+            {
+              action: {
+                label: result.opened ? "Download photo" : "Open WhatsApp",
+                onClick: () => {
+                  if (result.opened) {
+                    downloadBlob(file, file.name);
+                  } else {
+                    openBrowserTab(result.webUrl);
+                  }
+                },
+              },
+            },
+          );
+          return;
+        }
+        toast.message(
+          "WhatsApp is open on that number, with your message. Paste the invoice photo into that chat, then send.",
+        );
+      } finally {
+        sharingRef.current = false;
+        setSharing(false);
+      }
+      return;
+    }
     const placed = await placeInvoiceInWhatsApp(number, caption, file);
     if (placed === "pasted") {
       sharingRef.current = false;

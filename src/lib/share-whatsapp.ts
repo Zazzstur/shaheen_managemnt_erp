@@ -11,18 +11,53 @@ export function whatsAppChatUrl(phone: string, text: string) {
   return url.toString();
 }
 
+const maxClipboardEdge = 1600;
+
+export async function prepareClipboardPng(blob: Blob) {
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const largest = Math.max(bitmap.width, bitmap.height);
+    const scale = largest > maxClipboardEdge ? maxClipboardEdge / largest : 1;
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      bitmap.close();
+      return blob.type === "image/png"
+        ? blob
+        : new Blob([blob], { type: "image/png" });
+    }
+    context.fillStyle = "#FDFBF3";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+    const png = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/png");
+    });
+    return png ?? blob;
+  } catch {
+    return blob.type === "image/png"
+      ? blob
+      : new Blob([await blob.arrayBuffer()], { type: "image/png" });
+  }
+}
+
 export function copyPngToClipboard(file: Blob) {
   if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
     return Promise.resolve(false);
   }
-  // Pass a promise so the write stays tied to this click. Awaiting the bytes
-  // first, or opening WhatsApp first, makes the browser reject the copy.
-  const pngPromise = file.arrayBuffer().then(
-    (bytes) => new Blob([bytes], { type: "image/png" }),
-  );
+  const png =
+    file.type === "image/png" ? file : new Blob([file], { type: "image/png" });
   try {
     return navigator.clipboard
-      .write([new ClipboardItem({ "image/png": pngPromise })])
+      .write([
+        new ClipboardItem({
+          "image/png": Promise.resolve(png),
+        }),
+      ])
       .then(() => true)
       .catch(() => false);
   } catch {
@@ -55,7 +90,7 @@ export type LiveWhatsAppShare = {
 };
 
 export function shareImageFromBrowser(
-  file: File,
+  file: Blob,
   options: { phone?: string | null; text?: string },
 ): Promise<LiveWhatsAppShare> {
   const phone = options.phone || "";

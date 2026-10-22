@@ -12,6 +12,7 @@ import {
   downloadBlob,
   isLocalSchoolComputer,
   openBrowserTab,
+  prepareClipboardPng,
   shareImageFromBrowser,
 } from "@/lib/share-whatsapp";
 import { Button } from "@/components/ui/button";
@@ -90,7 +91,7 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-async function placeHomeworkPhoto(file: File) {
+async function placeHomeworkPhoto(file: Blob) {
   try {
     const imageBase64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
     const response = await fetch("/api/whatsapp-desktop", {
@@ -154,7 +155,7 @@ export default function HomeworkPage() {
   const [sharing, setSharing] = useState(false);
   const [readyIds, setReadyIds] = useState<string[]>([]);
   const sheetRefs = useRef(new Map<string, HTMLDivElement>());
-  const photosRef = useRef(new Map<string, File>());
+  const photosRef = useRef(new Map<string, Blob>());
   const groupsRef = useRef<Array<{ classLabel: string; rows: HomeworkRow[] }>>([]);
   const sunday = isSunday(date);
   const isSuperAdmin = me?.role === "super_admin";
@@ -226,15 +227,16 @@ export default function HomeworkPage() {
           try {
             const blob = await domToBlob(node, {
               backgroundColor: "#FDFBF3",
-              scale: 2,
+              scale: 1,
             });
             if (cancelled) {
               return;
             }
-            photosRef.current.set(
-              id,
-              new File([blob], "homework.png", { type: "image/png" }),
-            );
+            const png = await prepareClipboardPng(blob);
+            if (cancelled) {
+              return;
+            }
+            photosRef.current.set(id, png);
             ready.push(id);
           } catch {
             if (!cancelled) {
@@ -261,8 +263,11 @@ export default function HomeworkPage() {
       return;
     }
     if (!isLocalSchoolComputer()) {
+      const sharePromise = shareImageFromBrowser(file, {
+        text: `${classLabel} homework`,
+      });
       setSharing(true);
-      void shareImageFromBrowser(file, { text: `${classLabel} homework` })
+      void sharePromise
         .then((result) => {
           if (!result.copied) {
             toast.message(

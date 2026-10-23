@@ -76,6 +76,10 @@ export async function requireSuperAdmin(
   return await requireRoles(ctx, ["super_admin"]);
 }
 
+export function isIncharge(user: { staffRole?: string }) {
+  return user.staffRole === "incharge";
+}
+
 export async function requireClassTeacherForClass(
   ctx: QueryCtx | MutationCtx,
   classId: Id<"classes">,

@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { isIsoDate, requireClassTeacherForClass } from "./lib/auth";
+import { getCurrentUser, isIsoDate, requireClassTeacherForClass } from "./lib/auth";
 import { attendanceStatusValidator } from "./lib/validators";
 import { studentName } from "./lib/studentName";
 
@@ -9,6 +9,94 @@ const rosterItemValidator = v.object({
   admissionNumber: v.string(),
   name: v.string(),
   status: v.union(attendanceStatusValidator, v.null()),
+});
+
+const submissionValidator = v.object({
+  classId: v.id("classes"),
+  classLabel: v.string(),
+  classTeacherName: v.string(),
+  status: v.union(
+    v.literal("submitted"),
+    v.literal("partial"),
+    v.literal("missing"),
+  ),
+  presentCount: v.number(),
+  absentCount: v.number(),
+  lateCount: v.number(),
+  markedCount: v.number(),
+  enrolledCount: v.number(),
+});
+
+export const submissionForDate = query({
+  args: { date: v.string() },
+  returns: v.array(submissionValidator),
+  handler: async (ctx, args) => {
+    const user = await getCurrentUser(ctx);
+    if (user.staffRole !== "incharge") {
+      throw new Error("Only an incharge can review attendance submission");
+    }
+    if (!isIsoDate(args.date)) {
+      throw new Error("Date must be YYYY-MM-DD");
+    }
+    const rows = [];
+    for (const classId of user.classIds ?? []) {
+      const classroom = await ctx.db.get("classes", classId);
+      if (!classroom) {
+        continue;
+      }
+      const students = await ctx.db
+        .query("students")
+        .withIndex("by_class", (q) => q.eq("classId", classId))
+        .take(80);
+      const enrolled = students.filter((student) => student.status === "enrolled");
+      let presentCount = 0;
+      let absentCount = 0;
+      let lateCount = 0;
+      for (const student of enrolled) {
+        const existing = await ctx.db
+          .query("attendance")
+          .withIndex("by_student_and_date", (q) =>
+            q.eq("studentId", student._id).eq("date", args.date),
+          )
+          .unique();
+        if (existing?.status === "present") {
+          presentCount += 1;
+        } else if (existing?.status === "absent") {
+          absentCount += 1;
+        } else if (existing?.status === "late") {
+          lateCount += 1;
+        }
+      }
+      const markedCount = presentCount + absentCount + lateCount;
+      const holders = await ctx.db
+        .query("users")
+        .withIndex("by_class", (q) => q.eq("classId", classId))
+        .take(10);
+      const classTeacher = holders.find(
+        (holder) => holder.staffRole === "class_teacher",
+      );
+      const enrolledCount = enrolled.length;
+      rows.push({
+        classId,
+        classLabel: `${classroom.name} ${classroom.section}`.trim(),
+        classTeacherName:
+          classTeacher?.name ?? classTeacher?.email ?? "No class teacher",
+        status:
+          markedCount === 0
+            ? ("missing" as const)
+            : enrolledCount > 0 && markedCount >= enrolledCount
+              ? ("submitted" as const)
+              : ("partial" as const),
+        presentCount,
+        absentCount,
+        lateCount,
+        markedCount,
+        enrolledCount,
+      });
+    }
+    rows.sort((a, b) => a.classLabel.localeCompare(b.classLabel));
+    return rows;
+  },
 });
 
 export const rosterForClassDate = query({

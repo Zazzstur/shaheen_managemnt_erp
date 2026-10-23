@@ -28,6 +28,7 @@ export default defineSchema({
     status: userStatusValidator,
     staffRole: v.optional(staffRoleValidator),
     classId: v.optional(v.id("classes")),
+    classIds: v.optional(v.array(v.id("classes"))),
   })
     .index("email", ["email"])
     .index("phone", ["phone"])
@@ -198,6 +199,15 @@ export default defineSchema({
   teacherAbsences: defineTable({
     date: v.string(),
     teacherId: v.id("users"),
+  })
+    .index("by_date", ["date"])
+    .index("by_date_and_teacher", ["date", "teacherId"]),
+
+  staffAttendance: defineTable({
+    date: v.string(),
+    teacherId: v.id("users"),
+    status: attendanceStatusValidator,
+    markedBy: v.id("users"),
   })
     .index("by_date", ["date"])
     .index("by_date_and_teacher", ["date", "teacherId"]),

@@ -17,6 +17,7 @@ export const staffRoleValidator = v.union(
   v.literal("teacher"),
   v.literal("class_teacher"),
   v.literal("data_entry"),
+  v.literal("incharge"),
 );
 
 export const genderValidator = v.union(
@@ -94,6 +95,7 @@ export const userDocValidator = v.object({
   status: userStatusValidator,
   staffRole: v.optional(staffRoleValidator),
   classId: v.optional(v.id("classes")),
+  classIds: v.optional(v.array(v.id("classes"))),
 });
 
 export const classDocValidator = v.object({

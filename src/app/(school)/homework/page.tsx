@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { useMutation, useQuery } from "convex/react";
 import { domToBlob } from "modern-screenshot";
 import { api } from "@convex/_generated/api";
@@ -143,10 +144,18 @@ function HomeworkSheet({
 }
 
 export default function HomeworkPage() {
+  const pathname = usePathname();
+  const classOverview = pathname === "/homework/classes";
   const me = useQuery(api.users.me);
-  const classes = useQuery(
-    api.catalog.listClasses,
-    me?.role === "super_admin" ? {} : "skip",
+  const isIncharge = me?.staffRole === "incharge";
+  const canReview =
+    me?.role === "super_admin" || (isIncharge && classOverview);
+  const canEnter = me?.role === "teacher" && !canReview;
+  const classes = useQuery(api.catalog.listClasses, canReview ? {} : "skip");
+  const reviewClasses = (classes ?? []).filter((classroom) =>
+    me?.role === "super_admin"
+      ? true
+      : (me?.classIds ?? []).includes(classroom._id),
   );
   const [date, setDate] = useState(todayIso);
   const [classId, setClassId] = useState<Id<"classes"> | "">("");
@@ -158,18 +167,16 @@ export default function HomeworkPage() {
   const photosRef = useRef(new Map<string, Blob>());
   const groupsRef = useRef<Array<{ classLabel: string; rows: HomeworkRow[] }>>([]);
   const sunday = isSunday(date);
-  const isSuperAdmin = me?.role === "super_admin";
-  const canEnter = me?.role === "teacher";
   const mine = useQuery(
     api.homework.mineForDate,
     canEnter && !sunday ? { date } : "skip",
   );
   const classRows = useQuery(
     api.homework.forClassDate,
-    isSuperAdmin && classId && !sunday ? { classId, date } : "skip",
+    canReview && classId && !sunday ? { classId, date } : "skip",
   );
   const saveHomework = useMutation(api.homework.save);
-  const rows = isSuperAdmin ? classRows : mine;
+  const rows = canReview ? classRows : mine;
   const rowsKey = (rows ?? [])
     .map((row) => `${rowKey(row)}:${row.message}`)
     .join("|");
@@ -195,7 +202,7 @@ export default function HomeworkPage() {
     }
     return [...grouped.values()];
   }, [rows]);
-  const shareSignature = isSuperAdmin
+  const shareSignature = canReview
     ? groups
         .map((group) =>
           [
@@ -210,7 +217,7 @@ export default function HomeworkPage() {
   groupsRef.current = groups;
 
   useEffect(() => {
-    if (!isSuperAdmin || !shareSignature) {
+    if (!canReview || !shareSignature) {
       return;
     }
     const shareGroups = groupsRef.current;
@@ -255,7 +262,7 @@ export default function HomeworkPage() {
       photosRef.current.clear();
       setReadyIds([]);
     };
-  }, [isSuperAdmin, shareSignature]);
+  }, [canReview, shareSignature]);
 
   function onShare(classLabel: string, classId: string) {
     const file = photosRef.current.get(classId);
@@ -349,10 +356,24 @@ export default function HomeworkPage() {
   if (me === undefined) {
     return <p className="text-sm text-muted-foreground">Loading homework…</p>;
   }
-  if (me === null || (!canEnter && !isSuperAdmin)) {
+  if (classOverview && me && !canReview) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Only an incharge can open class homework.
+      </p>
+    );
+  }
+  if (me === null || (!canEnter && !canReview)) {
     return (
       <p className="text-sm text-muted-foreground">
         Only teachers and super admins can open homework.
+      </p>
+    );
+  }
+  if (canReview && isIncharge && reviewClasses.length === 0 && classes !== undefined) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        No classes are assigned to you yet.
       </p>
     );
   }
@@ -362,28 +383,28 @@ export default function HomeworkPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Homework</h1>
         <p className="text-sm text-muted-foreground">
-          {isSuperAdmin
+          {canReview
             ? "Homework for the selected class, taken from that day's timetable."
             : "Classes and subjects from your timetable for the selected day."}
         </p>
       </div>
       <Card>
         <CardHeader>
-          <CardTitle>{isSuperAdmin ? "Class homework" : "Enter homework"}</CardTitle>
+          <CardTitle>{canReview ? "Class homework" : "Enter homework"}</CardTitle>
           <CardDescription>
-            {isSuperAdmin
+            {canReview
               ? "Choose a class and a date."
               : "Use another date if homework for a missed day still needs to be entered."}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
-          {isSuperAdmin ? (
+          {canReview ? (
             <div className="space-y-2">
               <Label>Class</Label>
               <Select
                 value={classId || null}
                 items={Object.fromEntries(
-                  (classes ?? []).map((classroom) => [
+                  reviewClasses.map((classroom) => [
                     classroom._id,
                     `${classroom.name} ${classroom.section}`.trim(),
                   ]),
@@ -395,7 +416,7 @@ export default function HomeworkPage() {
                 <SelectTrigger className="w-full">
                   <span className="truncate">
                     {(() => {
-                      const selected = (classes ?? []).find(
+                      const selected = reviewClasses.find(
                         (classroom) => classroom._id === classId,
                       );
                       return selected
@@ -405,7 +426,7 @@ export default function HomeworkPage() {
                   </span>
                 </SelectTrigger>
                 <SelectContent>
-                  {(classes ?? []).map((classroom) => (
+                  {reviewClasses.map((classroom) => (
                     <SelectItem key={classroom._id} value={classroom._id}>
                       {classroom.name} {classroom.section}
                     </SelectItem>
@@ -430,7 +451,7 @@ export default function HomeworkPage() {
         <p className="text-sm text-muted-foreground">
           There is no timetable on Sunday.
         </p>
-      ) : isSuperAdmin && !classId ? (
+      ) : canReview && !classId ? (
         <p className="text-sm text-muted-foreground">
           Choose a class to see its homework.
         </p>
@@ -438,7 +459,7 @@ export default function HomeworkPage() {
         <p className="text-sm text-muted-foreground">Loading homework…</p>
       ) : groups.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          {isSuperAdmin
+          {canReview
             ? "This class has no subjects on the timetable for this day."
             : "No classes or subjects are on your timetable for this day."}
         </p>
@@ -450,7 +471,7 @@ export default function HomeworkPage() {
               <CardDescription>
                 {group.rows.length} {group.rows.length === 1 ? "period" : "periods"}
               </CardDescription>
-              {isSuperAdmin ? (
+              {canReview ? (
                 <CardAction>
                   <Button
                     type="button"
@@ -477,7 +498,7 @@ export default function HomeworkPage() {
               <div className="divide-y">
                 {group.rows.map((row) => {
                   const key = rowKey(row);
-                  const showTeacher = isSuperAdmin;
+                  const showTeacher = canReview;
                   return (
                     <div
                       key={key}
@@ -553,7 +574,7 @@ export default function HomeworkPage() {
           </Card>
         ))
       )}
-      {isSuperAdmin
+      {canReview
         ? groups.map((group, index) => {
             const id = group.rows[0]?.classId;
             if (!id) {

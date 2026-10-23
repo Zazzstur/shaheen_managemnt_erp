@@ -8,7 +8,7 @@ import {
   query,
   type MutationCtx,
 } from "./_generated/server";
-import { type Id } from "./_generated/dataModel";
+import { type Doc, type Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getCurrentUser, requireSuperAdmin } from "./lib/auth";
 import {
@@ -128,11 +128,47 @@ async function assertClassTeacherAvailable(
   }
 }
 
+async function existingClassIds(ctx: MutationCtx, classIds: Id<"classes">[]) {
+  const unique = [...new Set(classIds)];
+  if (unique.length > 40) {
+    throw new ConvexError("Select 40 classes or fewer");
+  }
+  for (const classId of unique) {
+    const classroom = await ctx.db.get("classes", classId);
+    if (!classroom) {
+      throw new ConvexError("Class not found");
+    }
+  }
+  return unique;
+}
+
+function staffProfile(
+  target: Doc<"users">,
+  staffRole: Doc<"users">["staffRole"],
+  classId?: Id<"classes">,
+  classIds?: Id<"classes">[],
+) {
+  const {
+    _id,
+    _creationTime,
+    classId: _classId,
+    classIds: _classIds,
+    ...rest
+  } = target;
+  return {
+    ...rest,
+    staffRole,
+    ...(classId ? { classId } : {}),
+    ...(classIds && classIds.length > 0 ? { classIds } : {}),
+  };
+}
+
 export const setStaffRole = mutation({
   args: {
     userId: v.id("users"),
     staffRole: staffRoleValidator,
     classId: v.optional(v.id("classes")),
+    classIds: v.optional(v.array(v.id("classes"))),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -144,31 +180,40 @@ export const setStaffRole = mutation({
     if (target.role !== "teacher") {
       throw new ConvexError("Staff roles can only be assigned to teacher logins");
     }
-    if (args.staffRole !== "class_teacher") {
-      if (target.classId === undefined) {
-        await ctx.db.patch("users", args.userId, {
-          staffRole: args.staffRole,
-        });
-      } else {
-        const { _id, _creationTime, classId: _classId, ...rest } = target;
-        await ctx.db.replace("users", args.userId, {
-          ...rest,
-          staffRole: args.staffRole,
-        });
-      }
+    if (args.staffRole === "class_teacher" && args.classId) {
+      await assertClassTeacherAvailable(ctx, args.classId, args.userId);
+      await ctx.db.replace(
+        "users",
+        args.userId,
+        staffProfile(target, "class_teacher", args.classId),
+      );
       return null;
     }
-    if (!args.classId) {
-      await ctx.db.patch("users", args.userId, {
-        staffRole: "class_teacher",
-      });
+    if (args.staffRole === "class_teacher") {
+      await ctx.db.replace(
+        "users",
+        args.userId,
+        staffProfile(target, "class_teacher", target.classId),
+      );
       return null;
     }
-    await assertClassTeacherAvailable(ctx, args.classId, args.userId);
-    await ctx.db.patch("users", args.userId, {
-      staffRole: "class_teacher",
-      classId: args.classId,
-    });
+    if (args.staffRole === "incharge") {
+      const classIds = await existingClassIds(
+        ctx,
+        args.classIds ?? (target.staffRole === "incharge" ? target.classIds ?? [] : []),
+      );
+      await ctx.db.replace(
+        "users",
+        args.userId,
+        staffProfile(target, "incharge", undefined, classIds),
+      );
+      return null;
+    }
+    await ctx.db.replace(
+      "users",
+      args.userId,
+      staffProfile(target, args.staffRole),
+    );
     return null;
   },
 });
@@ -239,6 +284,28 @@ export const teacherEmailTaken = internalQuery({
   },
 });
 
+export const assertClassesExist = internalQuery({
+  args: { classIds: v.array(v.id("classes")) },
+  returns: v.array(v.id("classes")),
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx);
+    const unique = [...new Set(args.classIds)];
+    if (unique.length === 0) {
+      throw new Error("Select at least one class for the incharge");
+    }
+    if (unique.length > 40) {
+      throw new Error("Select 40 classes or fewer");
+    }
+    for (const classId of unique) {
+      const classroom = await ctx.db.get("classes", classId);
+      if (!classroom) {
+        throw new Error("Class not found");
+      }
+    }
+    return unique;
+  },
+});
+
 export const createTeacher = action({
   args: {
     name: v.string(),
@@ -246,6 +313,7 @@ export const createTeacher = action({
     password: v.string(),
     staffRole: v.optional(staffRoleValidator),
     classId: v.optional(v.id("classes")),
+    classIds: v.optional(v.array(v.id("classes"))),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -276,6 +344,12 @@ export const createTeacher = action({
         classId: args.classId,
       });
     }
+    const classIds =
+      staffRole === "incharge"
+        ? await ctx.runQuery(internal.users.assertClassesExist, {
+            classIds: args.classIds ?? [],
+          })
+        : [];
     await createAccount(ctx, {
       provider: "password",
       account: { id: email, secret: args.password },
@@ -288,6 +362,7 @@ export const createTeacher = action({
         ...(staffRole === "class_teacher" && args.classId
           ? { classId: args.classId }
           : {}),
+        ...(staffRole === "incharge" ? { classIds } : {}),
       },
     });
     return null;

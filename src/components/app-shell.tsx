@@ -11,6 +11,7 @@ import {
   CalendarOff,
   ClipboardCheck,
   ContactRound,
+  UserCheck,
   FileText,
   GraduationCap,
   LayoutDashboard,
@@ -30,6 +31,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
+import { canOpenNavItem } from "@/lib/access";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -76,17 +78,24 @@ const NAV = [
     roles: ["super_admin"],
   },
   {
+    href: "/admin/staff-attendance",
+    label: "Staff attendance",
+    icon: UserCheck,
+    roles: ["super_admin"],
+  },
+  {
     href: "/admin/free-classes",
     label: "Free classes",
     icon: CalendarOff,
     roles: ["super_admin"],
+    alsoStaffRoles: ["incharge"],
   },
   {
     href: "/teacher/attendance",
     label: "Attendance",
     icon: ClipboardCheck,
     roles: ["teacher"],
-    staffRoles: ["class_teacher"],
+    staffRoles: ["class_teacher", "incharge"],
   },
   {
     href: "/report-cards",
@@ -106,6 +115,13 @@ const NAV = [
     icon: NotebookPen,
     roles: ["super_admin", "teacher"],
   },
+  {
+    href: "/homework/classes",
+    label: "Class homework",
+    icon: NotebookPen,
+    roles: ["teacher"],
+    staffRoles: ["incharge"],
+  },
 ] as const;
 
 function NavLinks({
@@ -124,9 +140,7 @@ function NavLinks({
         if (item.href === "/admin/users" && staffRole === "data_entry") {
           return false;
         }
-        if (!item.roles.includes(role as never)) return false;
-        if (!("staffRoles" in item)) return true;
-        return item.staffRoles.includes(staffRole as never);
+        return canOpenNavItem(item, role, staffRole);
       }).map((item) => {
         const Icon = item.icon;
         const active = pathname === item.href;
@@ -183,7 +197,9 @@ function SidebarBody() {
         <Badge className="mt-2" variant="secondary">
           {user.staffRole === "data_entry"
             ? "data entry"
-            : user.role.replace("_", " ")}
+            : user.staffRole === "incharge"
+              ? "incharge"
+              : user.role.replace("_", " ")}
         </Badge>
       </div>
       <Separator />

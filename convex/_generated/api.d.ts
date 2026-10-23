@@ -24,6 +24,7 @@ import type * as lib_roles from "../lib/roles.js";
 import type * as lib_studentName from "../lib/studentName.js";
 import type * as lib_validators from "../lib/validators.js";
 import type * as reportCards from "../reportCards.js";
+import type * as staffAttendance from "../staffAttendance.js";
 import type * as students from "../students.js";
 import type * as timetables from "../timetables.js";
 import type * as transport from "../transport.js";
@@ -52,6 +53,7 @@ declare const fullApi: ApiFromModules<{
   "lib/studentName": typeof lib_studentName;
   "lib/validators": typeof lib_validators;
   reportCards: typeof reportCards;
+  staffAttendance: typeof staffAttendance;
   students: typeof students;
   timetables: typeof timetables;
   transport: typeof transport;

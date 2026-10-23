@@ -1,7 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
-import { isIsoDate, requireRoles, requireSuperAdmin } from "./lib/auth";
+import { getCurrentUser, isIsoDate, requireRoles } from "./lib/auth";
 
 const homeworkRowValidator = v.object({
   classId: v.id("classes"),
@@ -129,7 +129,14 @@ export const forClassDate = query({
   },
   returns: v.array(homeworkRowValidator),
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    const user = await getCurrentUser(ctx);
+    const allowed =
+      user.role === "super_admin" ||
+      (user.staffRole === "incharge" &&
+        (user.classIds ?? []).includes(args.classId));
+    if (!allowed) {
+      throw new Error("Unauthorized: insufficient role");
+    }
     const day = weekdayFromIso(args.date);
     if (!day) {
       return [];

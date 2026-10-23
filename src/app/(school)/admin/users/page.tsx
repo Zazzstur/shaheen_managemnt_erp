@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { useAction, useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -35,6 +36,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 type TeacherAccountInput = {
   name: string;
@@ -46,9 +53,83 @@ const STAFF_ROLES = {
   teacher: "Teacher",
   class_teacher: "Class teacher",
   data_entry: "Data entry",
+  incharge: "Incharge",
 } as const;
 
 type StaffRole = keyof typeof STAFF_ROLES;
+
+function isStaffRole(value: string | null): value is StaffRole {
+  return (
+    value === "teacher" ||
+    value === "class_teacher" ||
+    value === "data_entry" ||
+    value === "incharge"
+  );
+}
+
+function classLabel(classroom: { name: string; section: string }) {
+  return `${classroom.name} ${classroom.section}`.trim();
+}
+
+function ClassMultiSelect({
+  classes,
+  selected,
+  onChange,
+}: {
+  classes: Array<{ _id: Id<"classes">; name: string; section: string }>;
+  selected: Id<"classes">[];
+  onChange: (next: Id<"classes">[]) => void;
+}) {
+  const labels = classes
+    .filter((classroom) => selected.includes(classroom._id))
+    .map(classLabel);
+  const summary =
+    labels.length === 0
+      ? "Select classes"
+      : labels.length <= 2
+        ? labels.join(", ")
+        : `${labels.length} classes`;
+  return (
+    <Popover>
+      <PopoverTrigger className="flex h-8 w-48 items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-2.5 text-sm">
+        <span className="truncate">{summary}</span>
+        <ChevronDown className="size-4 shrink-0 opacity-50" />
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-2">
+        <div className="max-h-64 space-y-1 overflow-y-auto">
+          {classes.length === 0 ? (
+            <p className="px-2 py-1 text-sm text-muted-foreground">
+              No classes yet.
+            </p>
+          ) : (
+            classes.map((classroom) => {
+              const checked = selected.includes(classroom._id);
+              return (
+                <label
+                  key={classroom._id}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted"
+                >
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={(value) => {
+                      const on = value === true;
+                      onChange(
+                        on
+                          ? [...selected, classroom._id]
+                          : selected.filter((id) => id !== classroom._id),
+                      );
+                    }}
+                  />
+                  <span>{classLabel(classroom)}</span>
+                </label>
+              );
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 const defaults: TeacherAccountInput = {
   name: "",
@@ -74,6 +155,7 @@ export default function TeachersPage() {
   const [saving, setSaving] = useState(false);
   const [staffRole, setStaffRole] = useState<StaffRole>("teacher");
   const [classId, setClassId] = useState<Id<"classes"> | "">("");
+  const [classIds, setClassIds] = useState<Id<"classes">[]>([]);
   const [openClassFor, setOpenClassFor] = useState<Id<"users"> | null>(null);
   const classItems = Object.fromEntries(
     (classes ?? []).map((classroom) => [
@@ -99,17 +181,23 @@ export default function TeachersPage() {
       toast.error("Select a class for the class teacher");
       return;
     }
+    if (staffRole === "incharge" && classIds.length === 0) {
+      toast.error("Select at least one class for the incharge");
+      return;
+    }
     setSaving(true);
     try {
       await createTeacher({
         ...values,
         staffRole,
         ...(staffRole === "class_teacher" && classId ? { classId } : {}),
+        ...(staffRole === "incharge" ? { classIds } : {}),
       });
       toast.success("Teacher login created");
       form.reset(defaults);
       setStaffRole("teacher");
       setClassId("");
+      setClassIds([]);
     } catch (error) {
       toast.error(mutationResult(error).message);
     } finally {
@@ -182,15 +270,15 @@ export default function TeachersPage() {
                 value={staffRole}
                 items={STAFF_ROLES}
                 onValueChange={(next) => {
-                  if (
-                    next === "teacher" ||
-                    next === "class_teacher" ||
-                    next === "data_entry"
-                  ) {
-                    setStaffRole(next);
-                    if (next !== "class_teacher") {
-                      setClassId("");
-                    }
+                  if (!next || !isStaffRole(next)) {
+                    return;
+                  }
+                  setStaffRole(next);
+                  if (next !== "class_teacher") {
+                    setClassId("");
+                  }
+                  if (next !== "incharge") {
+                    setClassIds([]);
                   }
                 }}
               >
@@ -201,9 +289,20 @@ export default function TeachersPage() {
                   <SelectItem value="teacher">Teacher</SelectItem>
                   <SelectItem value="class_teacher">Class teacher</SelectItem>
                   <SelectItem value="data_entry">Data entry</SelectItem>
+                  <SelectItem value="incharge">Incharge</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+            {staffRole === "incharge" ? (
+              <div className="space-y-2">
+                <Label>Classes</Label>
+                <ClassMultiSelect
+                  classes={classes ?? []}
+                  selected={classIds}
+                  onChange={setClassIds}
+                />
+              </div>
+            ) : null}
             {staffRole === "class_teacher" ? (
               <div className="space-y-2">
                 <Label htmlFor="teacher-class">Class</Label>
@@ -309,11 +408,7 @@ export default function TeachersPage() {
                           value={user.staffRole ?? "teacher"}
                           items={STAFF_ROLES}
                           onValueChange={(next) => {
-                            if (
-                              next !== "teacher" &&
-                              next !== "class_teacher" &&
-                              next !== "data_entry"
-                            ) {
+                            if (!next || !isStaffRole(next)) {
                               return;
                             }
                             if (next === "class_teacher") {
@@ -326,6 +421,9 @@ export default function TeachersPage() {
                               staffRole: next,
                               ...(next === "class_teacher" && user.classId
                                 ? { classId: user.classId }
+                                : {}),
+                              ...(next === "incharge"
+                                ? { classIds: user.classIds ?? [] }
                                 : {}),
                             }).catch((error) =>
                               toast.error(mutationResult(error).message),
@@ -341,8 +439,24 @@ export default function TeachersPage() {
                               Class teacher
                             </SelectItem>
                             <SelectItem value="data_entry">Data entry</SelectItem>
+                            <SelectItem value="incharge">Incharge</SelectItem>
                           </SelectContent>
                         </Select>
+                        {user.staffRole === "incharge" ? (
+                          <ClassMultiSelect
+                            classes={classes ?? []}
+                            selected={user.classIds ?? []}
+                            onChange={(next) => {
+                              void assignStaffRole({
+                                userId: user._id,
+                                staffRole: "incharge",
+                                classIds: next,
+                              }).catch((error) =>
+                                toast.error(mutationResult(error).message),
+                              );
+                            }}
+                          />
+                        ) : null}
                         {user.staffRole === "class_teacher" ? (
                           <Select
                             open={openClassFor === user._id}

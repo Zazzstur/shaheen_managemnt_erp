@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "convex/react";
-import { isSchoolAdmin } from "@/lib/access";
+import { canOpenNavItem, isSchoolAdmin } from "@/lib/access";
 import { api } from "@convex/_generated/api";
 import Link from "next/link";
 import {
@@ -42,6 +42,33 @@ const LINKS = [
     description: "Mark a class present, absent, or late.",
     roles: ["teacher"],
     staffRoles: ["class_teacher"],
+  },
+  {
+    href: "/teacher/attendance",
+    title: "Attendance",
+    description: "See which of your classes have submitted attendance.",
+    roles: ["teacher"],
+    staffRoles: ["incharge"],
+  },
+  {
+    href: "/admin/staff-attendance",
+    title: "Staff attendance",
+    description: "Mark staff present, absent, or late.",
+    roles: ["super_admin"],
+  },
+  {
+    href: "/admin/free-classes",
+    title: "Free classes",
+    description: "Assign a cover teacher for your classes.",
+    roles: ["teacher"],
+    staffRoles: ["incharge"],
+  },
+  {
+    href: "/homework/classes",
+    title: "Class homework",
+    description: "Review and share homework for your classes.",
+    roles: ["teacher"],
+    staffRoles: ["incharge"],
   },
   {
     href: "/report-cards",
@@ -93,18 +120,18 @@ export default function DashboardPage() {
           Signed in as{" "}
           {me.staffRole === "data_entry"
             ? "data entry"
-            : me.role.replace("_", " ")}
+            : me.staffRole === "incharge"
+              ? "incharge"
+              : me.role.replace("_", " ")}
           .
         </p>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         {LINKS.filter((link) => {
           const role = isSchoolAdmin(me) ? "super_admin" : me.role;
-          if (!link.roles.includes(role)) return false;
-          if (!link.staffRoles) return true;
-          return link.staffRoles.includes(me.staffRole as never);
+          return canOpenNavItem(link, role, me.staffRole);
         }).map((link) => (
-          <Link key={link.href} href={link.href}>
+          <Link key={`${link.href}-${link.title}`} href={link.href}>
             <Card className="h-full transition-colors hover:bg-muted/40">
               <CardHeader>
                 <CardTitle>{link.title}</CardTitle>

@@ -1,7 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
-import { isIsoDate, requireSchoolAdmin } from "./lib/auth";
+import { getCurrentUser, isIsoDate, isSchoolAdmin } from "./lib/auth";
 import { dayOfWeekValidator } from "./lib/validators";
 
 type Weekday =
@@ -131,7 +131,12 @@ export const forDate = query({
     periods: v.array(freePeriodValidator),
   }),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    const user = await getCurrentUser(ctx);
+    const incharge = user.staffRole === "incharge";
+    if (!isSchoolAdmin(user) && !incharge) {
+      throw new Error("Unauthorized: insufficient role");
+    }
+    const assignedClasses = new Set(user.classIds ?? []);
     const weekday = weekdayFromIso(args.date);
     const staff = await listStaff(ctx);
     const absences = await absencesOnDate(ctx, args.date);
@@ -185,6 +190,9 @@ export const forDate = query({
     const periods = [];
     for (const slot of slots) {
       if (!slot.teacherId || !absentIds.has(slot.teacherId)) {
+        continue;
+      }
+      if (incharge && !assignedClasses.has(slot.classId)) {
         continue;
       }
       const mains = mainsByPeriod.get(slot.periodNumber) ?? new Set();
@@ -247,7 +255,10 @@ export const setAbsence = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    const user = await getCurrentUser(ctx);
+    if (!isSchoolAdmin(user)) {
+      throw new Error("Unauthorized: insufficient role");
+    }
     if (!isIsoDate(args.date)) {
       throw new ConvexError("Date must be YYYY-MM-DD");
     }
@@ -292,7 +303,7 @@ export const setCover = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    const user = await getCurrentUser(ctx);
     const weekday = weekdayFromIso(args.date);
     if (!weekday) {
       throw new ConvexError("There is no timetable on Sunday");
@@ -300,6 +311,13 @@ export const setCover = mutation({
     const slot = await ctx.db.get("timetables", args.timetableId);
     if (!slot || slot.dayOfWeek !== weekday) {
       throw new ConvexError("That class period was not found on this day");
+    }
+    const allowed =
+      isSchoolAdmin(user) ||
+      (user.staffRole === "incharge" &&
+        (user.classIds ?? []).includes(slot.classId));
+    if (!allowed) {
+      throw new ConvexError("You can only assign a cover for your classes");
     }
     if (!slot.teacherId) {
       throw new ConvexError("That period has no main teacher");

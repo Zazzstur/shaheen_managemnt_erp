@@ -40,7 +40,107 @@ function todayIso() {
   return `${now.getFullYear()}-${month}-${day}`;
 }
 
-export default function AttendancePage() {
+const SUBMISSION_LABEL = {
+  submitted: "Submitted",
+  partial: "Partial",
+  missing: "Not submitted",
+} as const;
+
+function attendanceSummary(row: {
+  presentCount: number;
+  absentCount: number;
+  lateCount: number;
+  markedCount: number;
+  enrolledCount: number;
+}) {
+  if (row.markedCount === 0) {
+    return `0/${row.enrolledCount}`;
+  }
+  const parts = [`${row.presentCount} present`];
+  if (row.absentCount > 0) {
+    parts.push(`${row.absentCount} absent`);
+  }
+  if (row.lateCount > 0) {
+    parts.push(`${row.lateCount} late`);
+  }
+  const unmarked = row.enrolledCount - row.markedCount;
+  if (unmarked > 0) {
+    parts.push(`${unmarked} not marked`);
+  }
+  return parts.join(", ");
+}
+
+function InchargeAttendance() {
+  const [date, setDate] = useState(todayIso);
+  const rows = useQuery(api.attendance.submissionForDate, { date });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Attendance</h1>
+          <p className="text-sm text-muted-foreground">
+            See which of your classes have submitted attendance.
+          </p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="attendance-review-date">Date</Label>
+          <Input
+            id="attendance-review-date"
+            type="date"
+            value={date}
+            onChange={(event) => {
+              if (event.target.value) {
+                setDate(event.target.value);
+              }
+            }}
+          />
+        </div>
+      </div>
+      {rows === undefined ? (
+        <p className="text-sm text-muted-foreground">Loading attendance…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No classes are assigned to you yet.
+        </p>
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle>Class attendance</CardTitle>
+            <CardDescription>
+              Submitted means every student has a saved mark. The counts show
+              how many are present, absent, or late.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Class</TableHead>
+                  <TableHead>Class teacher</TableHead>
+                  <TableHead>Attendance</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  <TableRow key={row.classId}>
+                    <TableCell>{row.classLabel}</TableCell>
+                    <TableCell>{row.classTeacherName}</TableCell>
+                    <TableCell>{attendanceSummary(row)}</TableCell>
+                    <TableCell>{SUBMISSION_LABEL[row.status]}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function ClassTeacherAttendance() {
   const me = useQuery(api.users.me);
   const classes = useQuery(
     api.catalog.listClasses,
@@ -216,4 +316,15 @@ export default function AttendancePage() {
       </Card>
     </div>
   );
+}
+
+export default function AttendancePage() {
+  const me = useQuery(api.users.me);
+  if (me === undefined) {
+    return <p className="text-sm text-muted-foreground">Loading attendance…</p>;
+  }
+  if (me?.staffRole === "incharge") {
+    return <InchargeAttendance />;
+  }
+  return <ClassTeacherAttendance />;
 }

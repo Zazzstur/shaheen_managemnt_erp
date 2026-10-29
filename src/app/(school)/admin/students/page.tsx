@@ -414,7 +414,7 @@ export default function StudentsPage() {
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {selectedClass.tuitionCycle === "annual"
-                      ? `Annual class fee ${money(cycleTotal)}, shown as a monthly amount.`
+                      ? `Annual class fee ${money(cycleTotal)} for April–March, shown as a monthly amount.`
                       : "Tuition plus extra class fees."}
                   </p>
                 </div>

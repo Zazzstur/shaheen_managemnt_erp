@@ -4,8 +4,8 @@ import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
 import {
   academicFeeBreakdown,
   buildFeeAccount,
+  feeScheduleWindow,
   monthKeyFromTimestamp,
-  scheduleStartYear,
 } from "./lib/feeLedger";
 import { Doc, Id } from "./_generated/dataModel";
 import { uniqueInvoiceNumber } from "./lib/feeQuote";
@@ -1254,11 +1254,8 @@ async function studentLedger(
     };
   }
 
-  const viewYear = Number(asOf.slice(0, 4));
-  const startYear = scheduleStartYear(classroom.academicYear, viewYear);
-  const asOfMonth = asOf.slice(0, 7);
-  const fromMonth = `${startYear}-01`;
-  const throughMonth = `${viewYear}-12`;
+  const { feeYearStart, asOfMonth, fromMonth, throughMonth } =
+    feeScheduleWindow(classroom.academicYear, asOf);
 
   const invoices = await ctx.db
     .query("fees")
@@ -1286,7 +1283,7 @@ async function studentLedger(
     fromMonth,
     throughMonth,
     asOfMonth,
-    displayYear: viewYear,
+    feeYearStart,
   });
 
   const assignment = await ctx.db
@@ -1307,7 +1304,7 @@ async function studentLedger(
       ),
       throughMonth,
       asOfMonth,
-      displayYear: viewYear,
+      feeYearStart,
     });
     transportDue = transport.due;
     transportCharged = transport.chargedToDate;

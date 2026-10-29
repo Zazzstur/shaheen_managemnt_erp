@@ -35,6 +35,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { feeYearLabel, feeYearStartYear } from "@convex/lib/feeLedger";
 import { FeeOverview } from "./fee-overview";
 
 function money(value: number) {
@@ -42,6 +43,11 @@ function money(value: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+function feeYearHeading(iso: string) {
+  const start = feeYearStartYear(iso);
+  return `${feeYearLabel(start)} (1 April ${start} – 31 March ${start + 1})`;
 }
 
 function todayIso() {
@@ -103,7 +109,7 @@ type Statement = {
   studentName: string;
   admissionNumber: string;
   classLabel: string;
-  year: number;
+  year: string;
   academicEarlierPayments: number;
   academic: Account;
   transportAssigned: boolean;
@@ -220,8 +226,8 @@ function FeePanel({
         </div>
         {account.priorDue > 0 ? (
           <p className="text-sm text-muted-foreground">
-            {money(account.priorDue)} of the amount due is from months before{" "}
-            {account.months[0]?.label.slice(-4) ?? "this year"}.
+            {money(account.priorDue)} of the amount due is from months before
+            this fee year (April–March).
           </p>
         ) : null}
         {earlierPayments && earlierPayments > 0 ? (
@@ -925,7 +931,7 @@ function StatementView({
       <div className="grid gap-4 lg:grid-cols-2">
         <FeePanel
           title="Academic fee"
-          description="Charged for every month of the year, including months before admission. A larger payment becomes advance and is used on later months."
+          description="Charged for every month from April through March, including months before admission. A larger payment becomes advance and is used on later months."
           account={statement.academic}
           earlierPayments={statement.academicEarlierPayments}
           payments={statement.academicPayments}
@@ -1133,7 +1139,8 @@ export default function FeesPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Fees</h1>
           <p className="text-sm text-muted-foreground">
-            Academic fees and transport fees for this year.
+            Fee year {feeYearHeading(asOf)}. Academic and transport fees are
+            charged from April through March.
           </p>
         </div>
         {mine === undefined ? (
@@ -1201,6 +1208,7 @@ export default function FeesPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Fees</h1>
           <p className="text-sm text-muted-foreground">
+            Fee year {feeYearHeading(asOf)}.{" "}
             {canCollect
               ? "Search a student by name or admission number, then collect academic fees and transport fees separately."
               : "Fees are view only. Search a student to see academic and transport fees."}

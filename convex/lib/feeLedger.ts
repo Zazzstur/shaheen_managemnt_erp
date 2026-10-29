@@ -74,6 +74,49 @@ export function academicFeeBreakdown(args: {
   };
 }
 
+/** Fee year runs 1 April through 31 March. January–March belong to the year that started the previous April. */
+export function feeYearStartYear(iso: string) {
+  const year = Number(iso.slice(0, 4));
+  const month = Number(iso.slice(5, 7));
+  if (!Number.isFinite(year) || month < 1 || month > 12) {
+    return year;
+  }
+  return month >= 4 ? year : year - 1;
+}
+
+export function feeYearLabel(startYear: number) {
+  return `${startYear}-${startYear + 1}`;
+}
+
+export function feeYearStartIso(iso: string) {
+  return `${feeYearStartYear(iso)}-04-01`;
+}
+
+export function feeYearRange(startYear: number) {
+  return {
+    fromMonth: `${startYear}-04`,
+    throughMonth: `${startYear + 1}-03`,
+  };
+}
+
+export function feeScheduleWindow(academicYear: string, asOf: string) {
+  const feeYearStart = feeYearStartYear(asOf);
+  const startYear = scheduleStartYear(academicYear, feeYearStart);
+  const display = feeYearRange(feeYearStart);
+  return {
+    feeYearStart,
+    feeYearLabel: feeYearLabel(feeYearStart),
+    asOfMonth: asOf.slice(0, 7),
+    fromMonth: `${startYear}-04`,
+    throughMonth: display.throughMonth,
+  };
+}
+
+function inFeeYear(month: string, feeYearStart: number) {
+  const range = feeYearRange(feeYearStart);
+  return month >= range.fromMonth && month <= range.throughMonth;
+}
+
 export function dueInRange(
   account: FeeAccount,
   fromMonth: string,
@@ -89,8 +132,8 @@ export function dueInRange(
     }
     sum = roundMoney(sum + month.balance);
   }
-  const viewYear = Number(toMonth.slice(0, 4));
-  if (Number.isFinite(viewYear) && fromMonth <= `${viewYear}-01`) {
+  const feeYearStart = feeYearStartYear(toMonth);
+  if (Number.isFinite(feeYearStart) && fromMonth <= `${feeYearStart}-04`) {
     sum = roundMoney(sum + account.priorDue);
   }
   return sum;
@@ -109,13 +152,13 @@ export function monthKeyFromTimestamp(timestamp: number) {
   return `${date.getUTCFullYear()}-${month}`;
 }
 
-export function scheduleStartYear(academicYear: string, viewYear: number) {
+export function scheduleStartYear(academicYear: string, feeYearStart: number) {
   const match = academicYear.match(/(\d{4})/);
-  const parsed = match ? Number(match[1]) : viewYear;
+  const parsed = match ? Number(match[1]) : feeYearStart;
   if (!Number.isFinite(parsed) || parsed < 2000 || parsed > 2100) {
-    return viewYear;
+    return feeYearStart;
   }
-  return Math.min(parsed, viewYear);
+  return Math.min(parsed, feeYearStart);
 }
 
 export function buildFeeAccount(args: {
@@ -124,7 +167,7 @@ export function buildFeeAccount(args: {
   fromMonth: string;
   throughMonth: string;
   asOfMonth: string;
-  displayYear: number;
+  feeYearStart: number;
 }): FeeAccount {
   const monthlyRate = roundMoney(Math.max(0, args.monthlyRate));
   const paid = roundMoney(Math.max(0, args.paid));
@@ -161,11 +204,11 @@ export function buildFeeAccount(args: {
       const balance = roundMoney(monthlyRate - applied);
       if (open) {
         chargedToDate = roundMoney(chargedToDate + monthlyRate);
-        if (year < args.displayYear) {
+        if (key < `${args.feeYearStart}-04`) {
           priorUnpaid = roundMoney(priorUnpaid + balance);
         }
       }
-      if (year === args.displayYear) {
+      if (inFeeYear(key, args.feeYearStart)) {
         yearTotal = roundMoney(yearTotal + monthlyRate);
         months.push({
           month: key,
@@ -176,7 +219,7 @@ export function buildFeeAccount(args: {
           coverage: coverageFor(open, monthlyRate, applied, balance),
         });
       }
-    } else if (inWindow && year === args.displayYear) {
+    } else if (inWindow && inFeeYear(key, args.feeYearStart)) {
       yearTotal = roundMoney(yearTotal + monthlyRate);
       months.push({
         month: key,

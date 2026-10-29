@@ -24,9 +24,10 @@ import {
   allocatePayment,
   buildFeeAccount,
   dueInRange,
+  feeScheduleWindow,
+  feeYearStartYear,
   monthKeyFromTimestamp,
   roundMoney,
-  scheduleStartYear,
 } from "./lib/feeLedger";
 
 const paymentModeValidator = v.union(v.literal("cash"), v.literal("online"));
@@ -261,7 +262,7 @@ const feeStatementValidator = v.object({
   studentName: v.string(),
   admissionNumber: v.string(),
   classLabel: v.string(),
-  year: v.number(),
+  year: v.string(),
   academicEarlierPayments: v.number(),
   academic: feeAccountValidator,
   transportAssigned: v.boolean(),
@@ -311,14 +312,7 @@ function laterMonth(left: string, right: string) {
 }
 
 function feeWindow(classroom: Doc<"classes">, asOf: string) {
-  const viewYear = Number(asOf.slice(0, 4));
-  const startYear = scheduleStartYear(classroom.academicYear, viewYear);
-  return {
-    viewYear,
-    asOfMonth: asOf.slice(0, 7),
-    fromMonth: `${startYear}-01`,
-    throughMonth: `${viewYear}-12`,
-  };
+  return feeScheduleWindow(classroom.academicYear, asOf);
 }
 
 async function invoicePaymentsTotal(ctx: QueryCtx, studentId: Id<"students">) {
@@ -350,10 +344,8 @@ async function loadFeeStatement(
     throw new Error("Class not found for this student");
   }
 
-  const { viewYear, asOfMonth, fromMonth, throughMonth } = feeWindow(
-    classroom,
-    asOf,
-  );
+  const { feeYearStart, feeYearLabel, asOfMonth, fromMonth, throughMonth } =
+    feeWindow(classroom, asOf);
 
   const academicEarlierPayments = await invoicePaymentsTotal(
     ctx,
@@ -393,7 +385,7 @@ async function loadFeeStatement(
     fromMonth,
     throughMonth,
     asOfMonth,
-    displayYear: viewYear,
+    feeYearStart,
   });
 
   const assignment = await ctx.db
@@ -413,10 +405,10 @@ async function loadFeeStatement(
   const transport = buildFeeAccount({
     monthlyRate: assignment ? transportMonthly : 0,
     paid: transportPaid,
-    fromMonth: assignment ? transportFromMonth : `${viewYear + 1}-01`,
+    fromMonth: assignment ? transportFromMonth : `${feeYearStart + 1}-04`,
     throughMonth,
     asOfMonth,
-    displayYear: viewYear,
+    feeYearStart,
   });
 
   return {
@@ -424,7 +416,7 @@ async function loadFeeStatement(
     studentName: studentName(student),
     admissionNumber: student.admissionNumber,
     classLabel: `${classroom.name} ${classroom.section}`.trim(),
-    year: viewYear,
+    year: feeYearLabel,
     academicEarlierPayments,
     academic,
     transportAssigned: assignment !== null,
@@ -699,10 +691,8 @@ export const paymentInvoice = query({
       throw new Error("Class not found for this student");
     }
 
-    const { viewYear, asOfMonth, fromMonth, throughMonth } = feeWindow(
-      classroom,
-      payment.paidOn,
-    );
+    const { feeYearStart, feeYearLabel, asOfMonth, fromMonth, throughMonth } =
+      feeWindow(classroom, payment.paidOn);
     let monthlyRate = academicMonthlyRate(classroom, student);
     let chargeFrom = fromMonth;
     if (payment.kind === "transport") {
@@ -747,12 +737,12 @@ export const paymentInvoice = query({
     const before = buildFeeAccount({
       ...accountArgs,
       paid: paidBefore,
-      displayYear: viewYear,
+      feeYearStart,
     });
     const after = buildFeeAccount({
       ...accountArgs,
       paid: roundMoney(paidBefore + payment.amount),
-      displayYear: viewYear,
+      feeYearStart,
     });
     const allocation = allocatePayment({
       monthlyRate,
@@ -776,7 +766,7 @@ export const paymentInvoice = query({
       studentName: studentName(student),
       admissionNumber: student.admissionNumber,
       classLabel: `${classroom.name} ${classroom.section}`.trim(),
-      session: String(viewYear),
+      session: feeYearLabel,
       ...(fatherName ? { fatherName } : {}),
       ...(fatherPhone ? { fatherPhone } : {}),
       ...(motherName ? { motherName } : {}),
@@ -831,7 +821,7 @@ export const schoolSnapshot = query({
       throw new Error("Date must be YYYY-MM-DD");
     }
     const students = await enrolledStudents(ctx, undefined);
-    const dueFromMonth = `${args.asOf.slice(0, 4)}-01`;
+    const dueFromMonth = `${feeYearStartYear(args.asOf)}-04`;
     const dueToMonth = args.asOf.slice(0, 7);
     let monthlyCollection = 0;
     let paymentCount = 0;

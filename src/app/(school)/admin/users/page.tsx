@@ -1,8 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { useAction, useMutation, usePaginatedQuery, useQuery } from "convex/react";
+import {
+  useAction,
+  useMutation,
+  usePaginatedQuery,
+  useQuery,
+} from "convex/react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { api } from "@convex/_generated/api";
@@ -38,6 +43,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -69,6 +82,12 @@ function isStaffRole(value: string | null): value is StaffRole {
 
 function classLabel(classroom: { name: string; section: string }) {
   return `${classroom.name} ${classroom.section}`.trim();
+}
+
+function teacherDeleteMessage(name: string, classLabels: string[]) {
+  return classLabels.length > 0
+    ? `${name} has classes on the timetable (${classLabels.join(", ")}). Delete this teacher?`
+    : `Delete ${name}?`;
 }
 
 function ClassMultiSelect({
@@ -148,9 +167,23 @@ export default function TeachersPage() {
   const createTeacher = useAction(api.users.createTeacher);
   const setStatus = useMutation(api.users.setStatus);
   const assignStaffRole = useMutation(api.users.setStaffRole);
+  const deleteTeacher = useMutation(api.users.deleteTeacher);
+  const [deletingId, setDeletingId] = useState<Id<"users"> | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{
+    userId: Id<"users">;
+    message: string;
+  } | null>(null);
+  const confirmArmedAt = useRef(0);
   const classes = useQuery(
     api.catalog.listClasses,
     isSuperAdmin ? {} : "skip",
+  );
+  const timetableClasses = useQuery(
+    api.users.timetableClassesByTeacher,
+    isSuperAdmin ? {} : "skip",
+  );
+  const timetableLabels = new Map(
+    (timetableClasses ?? []).map((row) => [row.userId, row.classLabels]),
   );
   const [saving, setSaving] = useState(false);
   const [staffRole, setStaffRole] = useState<StaffRole>("teacher");
@@ -359,6 +392,7 @@ export default function TeachersPage() {
                   <TableHead>Email</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Role</TableHead>
+                  <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -494,18 +528,112 @@ export default function TeachersPage() {
                         ) : null}
                       </div>
                     </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        disabled={
+                          timetableClasses === undefined ||
+                          deletingId === user._id
+                        }
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          if (
+                            timetableClasses === undefined ||
+                            deletingId !== null
+                          ) {
+                            return;
+                          }
+                          const name =
+                            user.name?.trim() || user.email || "this teacher";
+                          const classLabels =
+                            timetableLabels.get(user._id) ?? [];
+                          confirmArmedAt.current = Date.now() + 400;
+                          setPendingDelete({
+                            userId: user._id,
+                            message: teacherDeleteMessage(name, classLabels),
+                          });
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           )}
           {status === "CanLoadMore" ? (
-            <Button className="mt-4" variant="outline" onClick={() => loadMore(20)}>
+            <Button
+              className="mt-4"
+              variant="outline"
+              type="button"
+              onClick={() => loadMore(20)}
+            >
               Load more
             </Button>
           ) : null}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && deletingId === null) {
+            setPendingDelete(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete teacher</DialogTitle>
+            <DialogDescription>
+              {pendingDelete?.message ?? "Delete this teacher?"}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              autoFocus
+              onClick={() => setPendingDelete(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={pendingDelete === null || deletingId !== null}
+              onClick={() => {
+                if (
+                  !pendingDelete ||
+                  deletingId !== null ||
+                  Date.now() < confirmArmedAt.current
+                ) {
+                  return;
+                }
+                const userId = pendingDelete.userId;
+                setDeletingId(userId);
+                void deleteTeacher({ userId })
+                  .then(() => {
+                    toast.success("Teacher deleted");
+                    setPendingDelete(null);
+                  })
+                  .catch((error) => {
+                    toast.error(mutationResult(error).message);
+                  })
+                  .finally(() => {
+                    setDeletingId(null);
+                  });
+              }}
+            >
+              {deletingId ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import {
   mutation,
   query,
   type MutationCtx,
+  type QueryCtx,
 } from "./_generated/server";
 import { type Doc, type Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
@@ -303,6 +304,170 @@ export const assertClassesExist = internalQuery({
       }
     }
     return unique;
+  },
+});
+
+const timetableClassLabelsValidator = v.object({
+  userId: v.id("users"),
+  classLabels: v.array(v.string()),
+});
+
+async function timetableSlotsForUser(
+  ctx: QueryCtx | MutationCtx,
+  userId: Id<"users">,
+) {
+  const main = await ctx.db
+    .query("timetables")
+    .withIndex("by_teacher", (q) => q.eq("teacherId", userId))
+    .take(200);
+  const assisting = await ctx.db
+    .query("timetables")
+    .withIndex("by_assistant_teacher", (q) =>
+      q.eq("assistantTeacherId", userId),
+    )
+    .take(200);
+  const seen = new Set<string>();
+  const slots = [];
+  for (const slot of [...main, ...assisting]) {
+    if (seen.has(slot._id)) {
+      continue;
+    }
+    seen.add(slot._id);
+    slots.push(slot);
+  }
+  return slots;
+}
+
+async function classDisplayLabel(
+  ctx: QueryCtx | MutationCtx,
+  classId: Id<"classes">,
+  cache: Map<Id<"classes">, string>,
+) {
+  const cached = cache.get(classId);
+  if (cached) {
+    return cached;
+  }
+  const classroom = await ctx.db.get("classes", classId);
+  const label = classroom
+    ? `${classroom.name} ${classroom.section}`.trim()
+    : "Unassigned class";
+  cache.set(classId, label);
+  return label;
+}
+
+export const timetableClassesByTeacher = query({
+  args: {},
+  returns: v.array(timetableClassLabelsValidator),
+  handler: async (ctx) => {
+    await requireSuperAdmin(ctx);
+    const teachers = await ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "teacher"))
+      .take(500);
+    const labelsByClass = new Map<Id<"classes">, string>();
+    const rows = [];
+    for (const teacher of teachers) {
+      const slots = await timetableSlotsForUser(ctx, teacher._id);
+      const labels = new Set<string>();
+      for (const slot of slots) {
+        labels.add(await classDisplayLabel(ctx, slot.classId, labelsByClass));
+      }
+      if (labels.size === 0) {
+        continue;
+      }
+      rows.push({
+        userId: teacher._id,
+        classLabels: [...labels].sort((a, b) => a.localeCompare(b)),
+      });
+    }
+    return rows;
+  },
+});
+
+export const deleteTeacher = mutation({
+  args: { userId: v.id("users") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const admin = await requireSuperAdmin(ctx);
+    if (admin._id === args.userId) {
+      throw new ConvexError("You cannot delete your own account");
+    }
+    const target = await ctx.db.get("users", args.userId);
+    if (!target || target.role !== "teacher") {
+      throw new ConvexError("Only teacher logins can be deleted");
+    }
+
+    const assignedSlots = await timetableSlotsForUser(ctx, args.userId);
+    for (const slot of assignedSlots) {
+      const {
+        _id,
+        _creationTime,
+        teacherId,
+        assistantTeacherId,
+        ...rest
+      } = slot;
+      await ctx.db.replace("timetables", _id, {
+        ...rest,
+        ...(teacherId && teacherId !== args.userId ? { teacherId } : {}),
+        ...(assistantTeacherId && assistantTeacherId !== args.userId
+          ? { assistantTeacherId }
+          : {}),
+      });
+    }
+
+    const absences = await ctx.db
+      .query("teacherAbsences")
+      .filter((q) => q.eq(q.field("teacherId"), args.userId))
+      .take(300);
+    for (const absence of absences) {
+      await ctx.db.delete("teacherAbsences", absence._id);
+    }
+    const attendance = await ctx.db
+      .query("staffAttendance")
+      .filter((q) => q.eq(q.field("teacherId"), args.userId))
+      .take(300);
+    for (const row of attendance) {
+      await ctx.db.delete("staffAttendance", row._id);
+    }
+    const covers = await ctx.db
+      .query("freeClassCovers")
+      .filter((q) => q.eq(q.field("coverTeacherId"), args.userId))
+      .take(300);
+    for (const cover of covers) {
+      await ctx.db.delete("freeClassCovers", cover._id);
+    }
+
+    const accounts = await ctx.db
+      .query("authAccounts")
+      .withIndex("userIdAndProvider", (q) => q.eq("userId", args.userId))
+      .take(20);
+    for (const account of accounts) {
+      const codes = await ctx.db
+        .query("authVerificationCodes")
+        .withIndex("accountId", (q) => q.eq("accountId", account._id))
+        .take(20);
+      for (const code of codes) {
+        await ctx.db.delete("authVerificationCodes", code._id);
+      }
+      await ctx.db.delete("authAccounts", account._id);
+    }
+    const sessions = await ctx.db
+      .query("authSessions")
+      .withIndex("userId", (q) => q.eq("userId", args.userId))
+      .take(20);
+    for (const session of sessions) {
+      const tokens = await ctx.db
+        .query("authRefreshTokens")
+        .withIndex("sessionId", (q) => q.eq("sessionId", session._id))
+        .take(20);
+      for (const token of tokens) {
+        await ctx.db.delete("authRefreshTokens", token._id);
+      }
+      await ctx.db.delete("authSessions", session._id);
+    }
+
+    await ctx.db.delete("users", args.userId);
+    return null;
   },
 });
 

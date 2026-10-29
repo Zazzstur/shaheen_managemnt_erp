@@ -8,6 +8,7 @@ import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
+import { feeYearLabel, feeYearStartYear } from "@convex/lib/feeLedger";
 import { classFormSchema, type ClassFormInput } from "@/lib/schemas";
 import { mutationResult } from "@/lib/result";
 import { isSchoolAdmin } from "@/lib/access";
@@ -46,14 +47,18 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 
-const emptyForm: ClassFormInput = {
-  name: "",
-  section: "",
-  academicYear: "2026-2027",
-  tuitionCycle: "monthly",
-  baseTuitionFee: 0,
-  extraFees: [],
-};
+function blankClassForm(): ClassFormInput {
+  const now = new Date();
+  const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  return {
+    name: "",
+    section: "",
+    academicYear: feeYearLabel(feeYearStartYear(iso)),
+    tuitionCycle: "monthly",
+    baseTuitionFee: 0,
+    extraFees: [],
+  };
+}
 
 function money(value: number) {
   return value.toFixed(2);
@@ -70,7 +75,7 @@ export default function ClassesPage() {
 
   const form = useForm<ClassFormInput>({
     resolver: zodResolver(classFormSchema),
-    defaultValues: emptyForm,
+    defaultValues: blankClassForm(),
   });
   const extraFees = useFieldArray({ control: form.control, name: "extraFees" });
   const watched = form.watch();
@@ -84,7 +89,7 @@ export default function ClassesPage() {
 
   useEffect(() => {
     if (!open) {
-      form.reset(emptyForm);
+      form.reset(blankClassForm());
       setEditingId(null);
     }
   }, [open, form]);
@@ -100,7 +105,7 @@ export default function ClassesPage() {
   }
 
   const openCreate = () => {
-    form.reset(emptyForm);
+    form.reset(blankClassForm());
     setEditingId(null);
     setOpen(true);
   };
@@ -277,6 +282,10 @@ export default function ClassesPage() {
                   placeholder="2026-2027"
                   {...form.register("academicYear")}
                 />
+                <p className="text-xs text-muted-foreground">
+                  1 April through 31 March. 2026-2027 is April 2026 to March
+                  2027.
+                </p>
                 {form.formState.errors.academicYear ? (
                   <p className="text-xs text-destructive">
                     {form.formState.errors.academicYear.message}
@@ -304,6 +313,10 @@ export default function ClassesPage() {
                     <SelectItem value="annual">Annual</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Monthly is charged each month. Annual is the April–March
+                  total, split into twelve monthly amounts.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="baseTuitionFee">Base tuition fee</Label>

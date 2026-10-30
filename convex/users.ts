@@ -13,6 +13,10 @@ import { type Doc, type Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getCurrentUser, requireSuperAdmin } from "./lib/auth";
 import {
+  allTimetableSlots,
+  assistantIdsOf,
+} from "./lib/timetableAssistants";
+import {
   staffRoleValidator,
   userDocValidator,
   userRoleValidator,
@@ -316,26 +320,11 @@ async function timetableSlotsForUser(
   ctx: QueryCtx | MutationCtx,
   userId: Id<"users">,
 ) {
-  const main = await ctx.db
-    .query("timetables")
-    .withIndex("by_teacher", (q) => q.eq("teacherId", userId))
-    .take(200);
-  const assisting = await ctx.db
-    .query("timetables")
-    .withIndex("by_assistant_teacher", (q) =>
-      q.eq("assistantTeacherId", userId),
-    )
-    .take(200);
-  const seen = new Set<string>();
-  const slots = [];
-  for (const slot of [...main, ...assisting]) {
-    if (seen.has(slot._id)) {
-      continue;
-    }
-    seen.add(slot._id);
-    slots.push(slot);
-  }
-  return slots;
+  const slots = await allTimetableSlots(ctx);
+  return slots.filter(
+    (slot) =>
+      slot.teacherId === userId || assistantIdsOf(slot).includes(userId),
+  );
 }
 
 async function classDisplayLabel(
@@ -365,15 +354,31 @@ export const timetableClassesByTeacher = query({
       .withIndex("by_role", (q) => q.eq("role", "teacher"))
       .take(500);
     const labelsByClass = new Map<Id<"classes">, string>();
+    const slots = await allTimetableSlots(ctx);
+    const classIdsByTeacher = new Map<Id<"users">, Set<Id<"classes">>>();
+    for (const slot of slots) {
+      const teacherIds = new Set<Id<"users">>();
+      if (slot.teacherId) {
+        teacherIds.add(slot.teacherId);
+      }
+      for (const assistantId of assistantIdsOf(slot)) {
+        teacherIds.add(assistantId);
+      }
+      for (const teacherId of teacherIds) {
+        const classIds = classIdsByTeacher.get(teacherId) ?? new Set();
+        classIds.add(slot.classId);
+        classIdsByTeacher.set(teacherId, classIds);
+      }
+    }
     const rows = [];
     for (const teacher of teachers) {
-      const slots = await timetableSlotsForUser(ctx, teacher._id);
-      const labels = new Set<string>();
-      for (const slot of slots) {
-        labels.add(await classDisplayLabel(ctx, slot.classId, labelsByClass));
-      }
-      if (labels.size === 0) {
+      const classIds = classIdsByTeacher.get(teacher._id);
+      if (!classIds || classIds.size === 0) {
         continue;
+      }
+      const labels = new Set<string>();
+      for (const classId of classIds) {
+        labels.add(await classDisplayLabel(ctx, classId, labelsByClass));
       }
       rows.push({
         userId: teacher._id,
@@ -399,19 +404,18 @@ export const deleteTeacher = mutation({
 
     const assignedSlots = await timetableSlotsForUser(ctx, args.userId);
     for (const slot of assignedSlots) {
-      const {
-        _id,
-        _creationTime,
-        teacherId,
-        assistantTeacherId,
-        ...rest
-      } = slot;
-      await ctx.db.replace("timetables", _id, {
-        ...rest,
-        ...(teacherId && teacherId !== args.userId ? { teacherId } : {}),
-        ...(assistantTeacherId && assistantTeacherId !== args.userId
-          ? { assistantTeacherId }
+      const assistantTeacherIds = assistantIdsOf(slot).filter(
+        (assistantId) => assistantId !== args.userId,
+      );
+      await ctx.db.replace("timetables", slot._id, {
+        classId: slot.classId,
+        dayOfWeek: slot.dayOfWeek,
+        periodNumber: slot.periodNumber,
+        subjectId: slot.subjectId,
+        ...(slot.teacherId && slot.teacherId !== args.userId
+          ? { teacherId: slot.teacherId }
           : {}),
+        ...(assistantTeacherIds.length > 0 ? { assistantTeacherIds } : {}),
       });
     }
 

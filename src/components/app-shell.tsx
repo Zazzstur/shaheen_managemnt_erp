@@ -1,15 +1,18 @@
 "use client";
 
-import { Authenticated, Unauthenticated, AuthLoading, useQuery } from "convex/react";
-import { useAuthActions } from "@convex-dev/auth/react";
+import { useQuery } from "convex/react";
+import { useAuthActions, useConvexAuth } from "@convex-dev/auth/react";
 import { api } from "@convex/_generated/api";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useRef } from "react";
 import {
   Bus,
   CalendarDays,
+  CalendarRange,
   CalendarOff,
   ClipboardCheck,
+  ClipboardList,
   ContactRound,
   UserCheck,
   FileText,
@@ -17,6 +20,7 @@ import {
   LayoutDashboard,
   Menu,
   NotebookPen,
+  PencilLine,
   Receipt,
   School,
   Users,
@@ -110,16 +114,29 @@ const NAV = [
     roles: ["super_admin", "teacher", "student", "parent"],
   },
   {
+    href: "/admin/teachers-timetable",
+    label: "Teachers timetable",
+    icon: CalendarRange,
+    roles: ["super_admin"],
+    alsoStaffRoles: ["incharge"],
+  },
+  {
+    href: "/classwork",
+    label: "Classwork",
+    icon: PencilLine,
+    roles: ["teacher"],
+  },
+  {
     href: "/homework",
     label: "Homework",
     icon: NotebookPen,
-    roles: ["super_admin", "teacher"],
+    roles: ["teacher"],
   },
   {
-    href: "/homework/classes",
-    label: "Class homework",
-    icon: NotebookPen,
-    roles: ["teacher"],
+    href: "/assignment",
+    label: "Assignment",
+    icon: ClipboardList,
+    roles: ["super_admin", "teacher"],
     staffRoles: ["incharge"],
   },
 ] as const;
@@ -166,7 +183,12 @@ function NavLinks({
 }
 
 function SidebarBody() {
-  const user = useQuery(api.users.me);
+  const loaded = useQuery(api.users.me);
+  const cached = useRef(loaded);
+  if (loaded !== undefined) {
+    cached.current = loaded;
+  }
+  const user = loaded === undefined ? cached.current : loaded;
   const { signOut } = useAuthActions();
 
   if (user === undefined) {
@@ -223,50 +245,51 @@ function SidebarBody() {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  return (
-    <>
-      <AuthLoading>
+  const { isAuthenticated, isLoading } = useConvexAuth();
+
+  if (!isAuthenticated) {
+    if (isLoading) {
+      return (
         <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
           Checking session…
         </div>
-      </AuthLoading>
-      <Unauthenticated>
-        <div className="flex min-h-screen flex-col items-center justify-center gap-3">
-          <p>You need to sign in to continue.</p>
-          <Button render={<Link href="/sign-in" />}>Go to sign in</Button>
-        </div>
-      </Unauthenticated>
-      <Authenticated>
-        <div className="flex min-h-screen bg-background">
-          <aside className="hidden w-64 shrink-0 border-r bg-sidebar p-4 md:block print:hidden">
-            <SidebarBody />
-          </aside>
-          <div className="flex min-w-0 flex-1 flex-col">
-            <header className="flex items-center gap-2 border-b px-4 py-3 md:hidden print:hidden">
-              <Sheet>
-                <SheetTrigger
-                  render={<Button variant="outline" size="icon" />}
-                >
-                  <Menu className="size-4" />
-                </SheetTrigger>
-                <SheetContent side="left" className="w-72 p-4">
-                  <SheetHeader>
-                    <SheetTitle>Navigation</SheetTitle>
-                  </SheetHeader>
-                  <SidebarBody />
-                </SheetContent>
-              </Sheet>
-              <img
-                src="/shaheen-academy-logo.svg"
-                alt=""
-                className="h-8 w-auto shrink-0"
-              />
-              <span className="font-medium">SACH</span>
-            </header>
-            <main className="flex-1 p-4 md:p-8 print:p-0">{children}</main>
-          </div>
-        </div>
-      </Authenticated>
-    </>
+      );
+    }
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3">
+        <p>You need to sign in to continue.</p>
+        <Button render={<Link href="/sign-in" />}>Go to sign in</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-screen bg-background">
+      <aside className="hidden w-64 shrink-0 border-r bg-sidebar p-4 md:block print:hidden">
+        <SidebarBody />
+      </aside>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center gap-2 border-b px-4 py-3 md:hidden print:hidden">
+          <Sheet>
+            <SheetTrigger render={<Button variant="outline" size="icon" />}>
+              <Menu className="size-4" />
+            </SheetTrigger>
+            <SheetContent side="left" className="w-72 p-4">
+              <SheetHeader>
+                <SheetTitle>Navigation</SheetTitle>
+              </SheetHeader>
+              <SidebarBody />
+            </SheetContent>
+          </Sheet>
+          <img
+            src="/shaheen-academy-logo.svg"
+            alt=""
+            className="h-8 w-auto shrink-0"
+          />
+          <span className="font-medium">SACH</span>
+        </header>
+        <main className="flex-1 p-4 md:p-8 print:p-0">{children}</main>
+      </div>
+    </div>
   );
 }

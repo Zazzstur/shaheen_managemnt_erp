@@ -22,11 +22,13 @@ export function SubjectField({
   selectedId,
   selectedName,
   onSelect,
+  onUnassign,
 }: {
   subjects: SubjectOption[];
   selectedId?: Id<"subjects">;
   selectedName?: string;
   onSelect: (subjectId: Id<"subjects">) => Promise<void> | void;
+  onUnassign?: () => Promise<void> | void;
 }) {
   const createOrGet = useMutation(api.catalog.createOrGetByName);
   const [saving, setSaving] = useState(false);
@@ -60,36 +62,55 @@ export function SubjectField({
       }}
     >
       {(query, close) => {
+        const showUnassign =
+          onUnassign !== undefined && textMatches(["Unassign"], query);
         const filtered = subjects.filter((subject) =>
           textMatches([subject.name], query),
         );
-        if (subjects.length === 0) {
+        const unassign = showUnassign ? (
+          <SearchOption
+            label="Unassign"
+            selected={!selectedId}
+            onClick={() => {
+              void (async () => {
+                await onUnassign?.();
+                close();
+              })();
+            }}
+          />
+        ) : null;
+        if (!showUnassign && subjects.length === 0) {
           return (
             <p className="px-1.5 py-1 text-xs text-muted-foreground">
               No subjects yet. Type a name and save.
             </p>
           );
         }
-        if (filtered.length === 0) {
+        if (!showUnassign && filtered.length === 0) {
           return (
             <p className="px-1.5 py-1 text-xs text-muted-foreground">
               No matching subjects.
             </p>
           );
         }
-        return filtered.map((subject) => (
-          <SearchOption
-            key={subject._id}
-            label={subject.name}
-            selected={subject._id === selectedId}
-            onClick={() => {
-              void (async () => {
-                await onSelect(subject._id);
-                close();
-              })();
-            }}
-          />
-        ));
+        return (
+          <>
+            {unassign}
+            {filtered.map((subject) => (
+              <SearchOption
+                key={subject._id}
+                label={subject.name}
+                selected={subject._id === selectedId}
+                onClick={() => {
+                  void (async () => {
+                    await onSelect(subject._id);
+                    close();
+                  })();
+                }}
+              />
+            ))}
+          </>
+        );
       }}
     </SearchPopover>
   );

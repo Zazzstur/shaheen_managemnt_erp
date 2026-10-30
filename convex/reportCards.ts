@@ -351,37 +351,95 @@ export const saveSubjectMarks = mutation({
 
 const reportCategoryValidator = v.union(
   v.literal("class_test_1"),
-  v.literal("half_yearly"),
+  v.literal("notebook_1"),
+  v.literal("enrichment_1"),
+  v.literal("written_1"),
   v.literal("class_test_2"),
-  v.literal("annual"),
+  v.literal("notebook_2"),
+  v.literal("enrichment_2"),
+  v.literal("written_2"),
 );
 
-// Exams saved before the rename are still titled "Class test 1/2".
+// One class stores an exam per subject for every category below.
+const categoryExamScan = 320;
+
+// Older periodic exams are still titled "Class test 1/2".
+// Written papers saved before this split are titled "Half yearly written"
+// or "Annual written". Combined "Half yearly" / "Annual" rows are read below
+// and are not renamed, so notebook and enrichment on those rows stay intact.
 const categoryMeta = {
   class_test_1: {
     title: "Periodic test 1",
     legacyTitles: ["Class test 1"],
     maxMarks: 20,
-    composite: false,
   },
-  half_yearly: {
-    title: "Half yearly",
+  notebook_1: {
+    title: "Notebook 1",
     legacyTitles: [],
+    maxMarks: 5,
+  },
+  enrichment_1: {
+    title: "Subject enrichment 1",
+    legacyTitles: [],
+    maxMarks: 5,
+  },
+  written_1: {
+    title: "Written 1",
+    legacyTitles: ["Half yearly written"],
     maxMarks: 80,
-    composite: true,
   },
   class_test_2: {
     title: "Periodic test 2",
     legacyTitles: ["Class test 2"],
     maxMarks: 20,
-    composite: false,
   },
-  annual: { title: "Annual", legacyTitles: [], maxMarks: 80, composite: true },
+  notebook_2: {
+    title: "Notebook 2",
+    legacyTitles: [],
+    maxMarks: 5,
+  },
+  enrichment_2: {
+    title: "Subject enrichment 2",
+    legacyTitles: [],
+    maxMarks: 5,
+  },
+  written_2: {
+    title: "Written 2",
+    legacyTitles: ["Annual written"],
+    maxMarks: 80,
+  },
 } as const;
 
-type CategoryMeta = (typeof categoryMeta)[keyof typeof categoryMeta];
+const legacyTermMeta = {
+  half: {
+    title: "Half yearly",
+    legacyTitles: ["Half-yearly"],
+  },
+  annual: {
+    title: "Annual",
+    legacyTitles: ["Annuals"],
+  },
+} as const;
 
-function matchesCategory(examTitle: string, meta: CategoryMeta) {
+type CategoryId = keyof typeof categoryMeta;
+type ExamTitleMeta = {
+  title: string;
+  legacyTitles: readonly string[];
+};
+type LegacyPart = "written" | "notebook" | "enrichment";
+
+const legacyRead: Partial<
+  Record<CategoryId, { term: keyof typeof legacyTermMeta; part: LegacyPart }>
+> = {
+  notebook_1: { term: "half", part: "notebook" },
+  enrichment_1: { term: "half", part: "enrichment" },
+  written_1: { term: "half", part: "written" },
+  notebook_2: { term: "annual", part: "notebook" },
+  enrichment_2: { term: "annual", part: "enrichment" },
+  written_2: { term: "annual", part: "written" },
+};
+
+function matchesCategory(examTitle: string, meta: ExamTitleMeta) {
   const normalized = examTitle.trim().toLowerCase();
   if (normalized === meta.title.toLowerCase()) {
     return true;
@@ -391,7 +449,7 @@ function matchesCategory(examTitle: string, meta: CategoryMeta) {
 
 function pickCategoryExam<T extends { title: string }>(
   exams: T[],
-  meta: CategoryMeta,
+  meta: ExamTitleMeta,
 ): T | undefined {
   const current = exams.find(
     (exam) => exam.title.trim().toLowerCase() === meta.title.toLowerCase(),
@@ -412,21 +470,51 @@ function assertStoredMark(
   }
 }
 
-function componentMark(value: number | "AB" | undefined): number | "AB" {
-  if (value === "AB") {
-    return "AB";
+function legacyWritten(mark: Doc<"marks"> | undefined): number | "AB" | undefined {
+  // Older half-yearly and annual rows stored written and notebook together.
+  // Enrichment-only rows leave notebookMarks unset; marksObtained is then only
+  // a required placeholder, not the written paper.
+  if (!mark || mark.notebookMarks === undefined) {
+    return undefined;
   }
-  return value ?? 0;
+  return mark.marksObtained;
 }
 
-const partValidator = v.union(
-  v.object({
-    written: storedMarkValidator,
-    notebook: storedMarkValidator,
-    enrichment: storedMarkValidator,
-  }),
-  v.null(),
-);
+function legacyNotebook(mark: Doc<"marks"> | undefined): number | "AB" | undefined {
+  if (!mark || mark.notebookMarks === undefined) {
+    return undefined;
+  }
+  return mark.notebookMarks;
+}
+
+function resolveSeparate(
+  examExists: boolean,
+  dedicated: number | "AB" | undefined,
+  legacy: number | "AB" | undefined,
+): number | "AB" | null {
+  if (examExists) {
+    return dedicated ?? null;
+  }
+  return legacy ?? null;
+}
+
+function legacyPart(
+  mark: Doc<"marks"> | undefined,
+  part: LegacyPart,
+): number | "AB" | undefined {
+  if (part === "written") {
+    return legacyWritten(mark);
+  }
+  if (part === "notebook") {
+    return legacyNotebook(mark);
+  }
+  if (!mark || mark.enrichmentMarks === undefined) {
+    return undefined;
+  }
+  return mark.enrichmentMarks;
+}
+
+const storedOrEmptyValidator = v.union(storedMarkValidator, v.null());
 
 export const categorySheet = query({
   args: {
@@ -439,10 +527,14 @@ export const categorySheet = query({
       v.object({
         studentId: v.id("students"),
         studentName: v.string(),
-        classTest1: v.union(v.number(), v.literal("AB"), v.null()),
-        classTest2: v.union(v.number(), v.literal("AB"), v.null()),
-        halfYearly: partValidator,
-        annual: partValidator,
+        classTest1: storedOrEmptyValidator,
+        notebook1: storedOrEmptyValidator,
+        enrichment1: storedOrEmptyValidator,
+        written1: storedOrEmptyValidator,
+        classTest2: storedOrEmptyValidator,
+        notebook2: storedOrEmptyValidator,
+        enrichment2: storedOrEmptyValidator,
+        written2: storedOrEmptyValidator,
       }),
     ),
   }),
@@ -456,7 +548,7 @@ export const categorySheet = query({
     const exams = await ctx.db
       .query("exams")
       .withIndex("by_class", (q) => q.eq("classId", args.classId))
-      .take(80);
+      .take(categoryExamScan);
     const subjectExams = exams.filter(
       (exam) => exam.subjectId === args.subjectId,
     );
@@ -465,7 +557,7 @@ export const categorySheet = query({
       .withIndex("by_class", (q) => q.eq("classId", args.classId))
       .take(80);
 
-    async function readPart(meta: CategoryMeta) {
+    async function readPart(meta: ExamTitleMeta) {
       const exam = pickCategoryExam(subjectExams, meta);
       if (!exam) {
         return null;
@@ -477,37 +569,47 @@ export const categorySheet = query({
       return new Map(rows.map((row) => [row.studentId, row]));
     }
 
-    const classTest1 = await readPart(categoryMeta.class_test_1);
-    const classTest2 = await readPart(categoryMeta.class_test_2);
-    const halfYearly = await readPart(categoryMeta.half_yearly);
-    const annual = await readPart(categoryMeta.annual);
+    const dedicated = {
+      class_test_1: await readPart(categoryMeta.class_test_1),
+      notebook_1: await readPart(categoryMeta.notebook_1),
+      enrichment_1: await readPart(categoryMeta.enrichment_1),
+      written_1: await readPart(categoryMeta.written_1),
+      class_test_2: await readPart(categoryMeta.class_test_2),
+      notebook_2: await readPart(categoryMeta.notebook_2),
+      enrichment_2: await readPart(categoryMeta.enrichment_2),
+      written_2: await readPart(categoryMeta.written_2),
+    };
+    const halfYearly = await readPart(legacyTermMeta.half);
+    const annual = await readPart(legacyTermMeta.annual);
+
+    function cell(category: CategoryId, studentId: (typeof students)[number]["_id"]) {
+      const source = legacyRead[category];
+      const legacyMark = source
+        ? (source.term === "half" ? halfYearly : annual)?.get(studentId)
+        : undefined;
+      return resolveSeparate(
+        dedicated[category] !== null,
+        dedicated[category]?.get(studentId)?.marksObtained,
+        source ? legacyPart(legacyMark, source.part) : undefined,
+      );
+    }
 
     const rows = [];
     for (const student of students) {
       if (student.status !== "enrolled") {
         continue;
       }
-      const half = halfYearly?.get(student._id);
-      const year = annual?.get(student._id);
       rows.push({
         studentId: student._id,
         studentName: studentName(student),
-        classTest1: classTest1?.get(student._id)?.marksObtained ?? null,
-        classTest2: classTest2?.get(student._id)?.marksObtained ?? null,
-        halfYearly: half
-          ? {
-              written: componentMark(half.marksObtained),
-              notebook: componentMark(half.notebookMarks),
-              enrichment: componentMark(half.enrichmentMarks),
-            }
-          : null,
-        annual: year
-          ? {
-              written: componentMark(year.marksObtained),
-              notebook: componentMark(year.notebookMarks),
-              enrichment: componentMark(year.enrichmentMarks),
-            }
-          : null,
+        classTest1: cell("class_test_1", student._id),
+        notebook1: cell("notebook_1", student._id),
+        enrichment1: cell("enrichment_1", student._id),
+        written1: cell("written_1", student._id),
+        classTest2: cell("class_test_2", student._id),
+        notebook2: cell("notebook_2", student._id),
+        enrichment2: cell("enrichment_2", student._id),
+        written2: cell("written_2", student._id),
       });
     }
     rows.sort((a, b) => a.studentName.localeCompare(b.studentName));
@@ -529,8 +631,6 @@ export const saveCategoryMarks = mutation({
         studentId: v.id("students"),
         cleared: v.optional(v.boolean()),
         marksObtained: v.optional(storedMarkValidator),
-        notebookMarks: v.optional(storedMarkValidator),
-        enrichmentMarks: v.optional(storedMarkValidator),
       }),
     ),
   },
@@ -565,41 +665,35 @@ export const saveCategoryMarks = mutation({
       if (mark.cleared) {
         continue;
       }
-      if (mark.marksObtained === undefined) {
-        throw new ConvexError("Enter a mark or leave every field empty to clear it");
-      }
       const name = studentName(student);
+      if (mark.marksObtained === undefined) {
+        throw new ConvexError("Enter a mark or leave the field empty to clear it");
+      }
       assertStoredMark(
         mark.marksObtained,
         meta.maxMarks,
-        meta.composite
-          ? `${name}: written marks must be between 0 and 80, or AB`
-          : `${name}: marks must be between 0 and 20, or AB`,
+        `${name}: marks must be between 0 and ${meta.maxMarks}, or AB`,
       );
-      if (meta.composite) {
-        assertStoredMark(
-          mark.notebookMarks ?? 0,
-          5,
-          `${name}: notebook marks must be between 0 and 5, or AB`,
-        );
-        assertStoredMark(
-          mark.enrichmentMarks ?? 0,
-          5,
-          `${name}: subject enrichment marks must be between 0 and 5, or AB`,
-        );
-      }
     }
 
     const exams = await ctx.db
       .query("exams")
       .withIndex("by_class", (q) => q.eq("classId", args.classId))
-      .take(80);
-    const existingExam = pickCategoryExam(
-      exams.filter((item) => item.subjectId === args.subjectId),
-      meta,
+      .take(categoryExamScan);
+    const subjectExams = exams.filter(
+      (item) => item.subjectId === args.subjectId,
     );
+    const existingExam = pickCategoryExam(subjectExams, meta);
+    const legacy = legacyRead[args.category];
+    const legacyExam = legacy
+      ? pickCategoryExam(subjectExams, legacyTermMeta[legacy.term])
+      : undefined;
     const hasMarksToSave = args.marks.some((mark) => !mark.cleared);
-    if (!existingExam && !hasMarksToSave) {
+    const hideLegacy =
+      legacyExam !== undefined &&
+      args.marks.length > 0 &&
+      args.marks.every((mark) => mark.cleared === true);
+    if (!existingExam && !hasMarksToSave && !hideLegacy) {
       return null;
     }
     const examId = existingExam
@@ -636,22 +730,17 @@ export const saveCategoryMarks = mutation({
         continue;
       }
       if (mark.marksObtained === undefined) {
-        throw new ConvexError("Enter a mark or leave every field empty to clear it");
+        throw new ConvexError("Enter a mark or leave the field empty to clear it");
       }
-      const patch = meta.composite
-        ? {
-            marksObtained: mark.marksObtained,
-            notebookMarks: mark.notebookMarks ?? 0,
-            enrichmentMarks: mark.enrichmentMarks ?? 0,
-          }
-        : { marksObtained: mark.marksObtained };
       if (existing) {
-        await ctx.db.patch("marks", existing._id, patch);
+        await ctx.db.patch("marks", existing._id, {
+          marksObtained: mark.marksObtained,
+        });
       } else {
         await ctx.db.insert("marks", {
           examId,
           studentId: mark.studentId,
-          ...patch,
+          marksObtained: mark.marksObtained,
         });
       }
     }
@@ -666,10 +755,6 @@ const printLineValidator = v.object({
   subjectName: v.string(),
   total: printCellValidator,
   maxMarks: v.number(),
-  written: printCellValidator,
-  notebook: printCellValidator,
-  enrichment: printCellValidator,
-  classTestHalf: printCellValidator,
 });
 
 export const printableReport = query({
@@ -680,7 +765,6 @@ export const printableReport = query({
   returns: v.object({
     classLabel: v.string(),
     categoryTitle: v.string(),
-    composite: v.boolean(),
     students: v.array(
       v.object({
         studentId: v.id("students"),
@@ -701,25 +785,17 @@ export const printableReport = query({
       throw new Error("Class not found");
     }
     const meta = categoryMeta[args.category];
-    const linkedMeta =
-      args.category === "half_yearly"
-        ? categoryMeta.class_test_1
-        : args.category === "annual"
-          ? categoryMeta.class_test_2
-          : null;
+    const legacy = legacyRead[args.category];
     const exams = await ctx.db
       .query("exams")
       .withIndex("by_class", (q) => q.eq("classId", args.classId))
-      .take(80);
+      .take(categoryExamScan);
 
-    function examsBySubject(target: CategoryMeta | null) {
+    function examsBySubject(target: ExamTitleMeta) {
       const bySubject = new Map<
         (typeof exams)[number]["subjectId"],
         (typeof exams)[number]
       >();
-      if (!target) {
-        return bySubject;
-      }
       const subjectIds = new Set(
         exams
           .filter((exam) => matchesCategory(exam.title, target))
@@ -738,12 +814,17 @@ export const printableReport = query({
     }
 
     const categoryExamBySubject = examsBySubject(meta);
-    const linkedExamBySubject = examsBySubject(linkedMeta);
+    const legacyExamBySubject = legacy
+      ? examsBySubject(legacyTermMeta[legacy.term])
+      : new Map<
+          (typeof exams)[number]["subjectId"],
+          (typeof exams)[number]
+        >();
 
     const subjectIds = [
       ...new Set([
         ...categoryExamBySubject.keys(),
-        ...linkedExamBySubject.keys(),
+        ...legacyExamBySubject.keys(),
       ]),
     ];
     const subjectNames = new Map<string, string>();
@@ -763,26 +844,24 @@ export const printableReport = query({
       return new Map(rows.map((row) => [row.studentId, row]));
     }
 
-    const categoryMarks = new Map<
-      string,
-      NonNullable<Awaited<ReturnType<typeof marksFor>>>
-    >();
-    for (const [subjectId, exam] of categoryExamBySubject) {
-      const marks = await marksFor(exam._id);
-      if (marks) {
-        categoryMarks.set(subjectId, marks);
+    async function marksBySubject(
+      bySubject: ReturnType<typeof examsBySubject>,
+    ) {
+      const result = new Map<
+        string,
+        NonNullable<Awaited<ReturnType<typeof marksFor>>>
+      >();
+      for (const [subjectId, exam] of bySubject) {
+        const marks = await marksFor(exam._id);
+        if (marks) {
+          result.set(subjectId, marks);
+        }
       }
+      return result;
     }
-    const linkedMarks = new Map<
-      string,
-      NonNullable<Awaited<ReturnType<typeof marksFor>>>
-    >();
-    for (const [subjectId, exam] of linkedExamBySubject) {
-      const marks = await marksFor(exam._id);
-      if (marks) {
-        linkedMarks.set(subjectId, marks);
-      }
-    }
+
+    const categoryMarks = await marksBySubject(categoryExamBySubject);
+    const legacyMarks = await marksBySubject(legacyExamBySubject);
 
     const students = await ctx.db
       .query("students")
@@ -796,51 +875,20 @@ export const printableReport = query({
       const lines = [];
       for (const subjectId of subjectIds) {
         const mark = categoryMarks.get(subjectId)?.get(student._id);
-        const linked = linkedMarks.get(subjectId)?.get(student._id);
-        if (mark === undefined && linked === undefined) {
-          continue;
-        }
-        const classTestHalf: number | "AB" | null =
-          linked === undefined
-            ? null
-            : linked.marksObtained === "AB"
-              ? "AB"
-              : linked.marksObtained / 2;
-        if (!meta.composite) {
-          lines.push({
-            subjectId,
-            subjectName: subjectNames.get(subjectId) ?? "Unknown subject",
-            total: mark ? mark.marksObtained : null,
-            maxMarks: 20,
-            written: null,
-            notebook: null,
-            enrichment: null,
-            classTestHalf: null,
-          });
-          continue;
-        }
-        const written = mark ? componentMark(mark.marksObtained) : null;
-        const notebook = mark ? componentMark(mark.notebookMarks) : null;
-        const enrichment = mark ? componentMark(mark.enrichmentMarks) : null;
-        const anyAbsent = [written, notebook, enrichment, classTestHalf].some(
-          (value) => value === "AB",
+        const legacyRow = legacyMarks.get(subjectId)?.get(student._id);
+        const total = resolveSeparate(
+          categoryExamBySubject.has(subjectId),
+          mark?.marksObtained,
+          legacy ? legacyPart(legacyRow, legacy.part) : undefined,
         );
-        const total =
-          typeof written === "number" && !anyAbsent
-            ? written +
-              (typeof notebook === "number" ? notebook : 0) +
-              (typeof enrichment === "number" ? enrichment : 0) +
-              (typeof classTestHalf === "number" ? classTestHalf : 0)
-            : null;
+        if (total === null) {
+          continue;
+        }
         lines.push({
           subjectId,
           subjectName: subjectNames.get(subjectId) ?? "Unknown subject",
           total,
-          maxMarks: 100,
-          written,
-          notebook,
-          enrichment,
-          classTestHalf,
+          maxMarks: meta.maxMarks,
         });
       }
       lines.sort((a, b) => a.subjectName.localeCompare(b.subjectName));
@@ -869,7 +917,6 @@ export const printableReport = query({
     return {
       classLabel: `${classroom.name} ${classroom.section}`.trim(),
       categoryTitle: meta.title,
-      composite: meta.composite,
       students: rows,
     };
   },

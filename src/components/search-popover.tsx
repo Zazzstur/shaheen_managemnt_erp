@@ -12,13 +12,19 @@ export function normalizeForSearch(value: string) {
   return value.normalize("NFC").toLocaleLowerCase();
 }
 
+function collapseSpaces(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
 export function textMatches(
   parts: Array<string | undefined | null>,
   query: string,
 ) {
-  const needle = normalizeForSearch(query.trim());
+  const needle = normalizeForSearch(collapseSpaces(query));
   if (!needle) return true;
-  return normalizeForSearch(parts.filter(Boolean).join(" ")).includes(needle);
+  return normalizeForSearch(
+    collapseSpaces(parts.filter(Boolean).join(" ")),
+  ).includes(needle);
 }
 
 export function SearchOption({

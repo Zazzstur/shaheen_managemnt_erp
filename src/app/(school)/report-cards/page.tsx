@@ -49,13 +49,44 @@ function gradeFor(percent: number | null) {
 }
 
 const CATEGORIES = [
-  { id: "class_test_1", label: "Periodic test 1 — 20", composite: false },
-  { id: "half_yearly", label: "Half yearly — 100", composite: true },
-  { id: "class_test_2", label: "Periodic test 2 — 20", composite: false },
-  { id: "annual", label: "Annual — 100", composite: true },
+  { id: "class_test_1", label: "Periodic test 1 — 20", max: 20 },
+  { id: "notebook_1", label: "Notebook 1 — 5", max: 5 },
+  { id: "enrichment_1", label: "Subject enrichment 1 — 5", max: 5 },
+  { id: "written_1", label: "Written 1 — 80", max: 80 },
+  { id: "class_test_2", label: "Periodic test 2 — 20", max: 20 },
+  { id: "notebook_2", label: "Notebook 2 — 5", max: 5 },
+  { id: "enrichment_2", label: "Subject enrichment 2 — 5", max: 5 },
+  { id: "written_2", label: "Written 2 — 80", max: 80 },
 ] as const;
 
 type ReportCategory = (typeof CATEGORIES)[number]["id"];
+type CategorySheet = FunctionReturnType<typeof api.reportCards.categorySheet>;
+type SheetStudent = CategorySheet["students"][number];
+
+function isReportCategory(value: string | null): value is ReportCategory {
+  return CATEGORIES.some((item) => item.id === value);
+}
+
+function simpleMark(student: SheetStudent, category: ReportCategory) {
+  switch (category) {
+    case "class_test_1":
+      return student.classTest1;
+    case "notebook_1":
+      return student.notebook1;
+    case "enrichment_1":
+      return student.enrichment1;
+    case "written_1":
+      return student.written1;
+    case "class_test_2":
+      return student.classTest2;
+    case "notebook_2":
+      return student.notebook2;
+    case "enrichment_2":
+      return student.enrichment2;
+    case "written_2":
+      return student.written2;
+  }
+}
 
 function formatMark(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
@@ -135,18 +166,6 @@ function normalizeDraft(value: string) {
   return value;
 }
 
-function draftComponent(value: string | undefined): number | "AB" | "blank" {
-  const trimmed = (value ?? "").trim();
-  if (trimmed === "" || /^a$/i.test(trimmed)) {
-    return "blank";
-  }
-  if (/^ab$/i.test(trimmed)) {
-    return "AB";
-  }
-  const number = Number(trimmed);
-  return Number.isFinite(number) ? number : "blank";
-}
-
 function printCategoryTitle(title: string) {
   return title.replace(/\b1\b/g, "I").replace(/\b2\b/g, "II").toUpperCase();
 }
@@ -158,10 +177,8 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
   const [category, setCategory] = useState<ReportCategory | "">("");
   const [date] = useState(todayIso);
   const [scores, setScores] = useState<Record<string, string>>({});
-  const [notebooks, setNotebooks] = useState<Record<string, string>>({});
-  const [enrichments, setEnrichments] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const seededFor = useRef("");
+  const [seededKey, setSeededKey] = useState("");
   const saveCategoryMarks = useMutation(api.reportCards.saveCategoryMarks);
   const sheet = useQuery(
     api.reportCards.categorySheet,
@@ -195,100 +212,54 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
     }
     const rosterKey = sheet.students.map((student) => student.studentId).join(",");
     const key = `${classId}:${subjectId}:${category}:${rosterKey}`;
-    if (seededFor.current === key) {
+    if (seededKey === key) {
       return;
     }
-    seededFor.current = key;
     const nextScores: Record<string, string> = {};
-    const nextNotebooks: Record<string, string> = {};
-    const nextEnrichments: Record<string, string> = {};
     for (const student of sheet.students) {
-      if (category === "class_test_1" && student.classTest1 !== null) {
-        nextScores[student.studentId] = String(student.classTest1);
-      }
-      if (category === "class_test_2" && student.classTest2 !== null) {
-        nextScores[student.studentId] = String(student.classTest2);
-      }
-      const part =
-        category === "half_yearly"
-          ? student.halfYearly
-          : category === "annual"
-            ? student.annual
-            : null;
-      if (part) {
-        nextScores[student.studentId] = String(part.written);
-        nextNotebooks[student.studentId] = String(part.notebook);
-        nextEnrichments[student.studentId] = String(part.enrichment);
+      const value = simpleMark(student, category);
+      if (value !== null) {
+        nextScores[student.studentId] = String(value);
       }
     }
+    setSeededKey(key);
     setScores(nextScores);
-    setNotebooks(nextNotebooks);
-    setEnrichments(nextEnrichments);
-  }, [sheet, category, classId, subjectId]);
+  }, [sheet, category, classId, subjectId, seededKey]);
 
   const subjectName =
     subjectOptions.find((subject) => subject.subjectId === subjectId)
       ?.subjectName ?? "Subject";
+  const rosterKey =
+    sheet?.students.map((student) => student.studentId).join(",") ?? "";
+  const formKey =
+    classId && subjectId && category
+      ? `${classId}:${subjectId}:${category}:${rosterKey}`
+      : "";
+  const scoresReady = formKey !== "" && seededKey === formKey;
 
   async function onSave() {
-    if (!classId || !subjectId || !category || !sheet || !selectedCategory) {
+    if (!classId || !subjectId || !category || !sheet || !selectedCategory || !scoresReady) {
       toast.error("Select a class, subject, and category");
       return;
     }
     const marks = [];
     for (const student of sheet.students) {
-      const writtenRaw = (scores[student.studentId] ?? "").trim();
-      const notebookRaw = (notebooks[student.studentId] ?? "").trim();
-      const enrichmentRaw = (enrichments[student.studentId] ?? "").trim();
-      if (selectedCategory.composite) {
-        const written = parseMarkField(writtenRaw, 80);
-        const notebook = parseMarkField(notebookRaw, 5);
-        const enrichment = parseMarkField(enrichmentRaw, 5);
-        if (
-          written.state === "empty" &&
-          notebook.state === "empty" &&
-          enrichment.state === "empty"
-        ) {
-          marks.push({ studentId: student.studentId, cleared: true });
-          continue;
-        }
-        if (written.state === "invalid") {
-          toast.error(
-            `${student.studentName}: written marks must be between 0 and 80, or AB`,
-          );
-          return;
-        }
-        if (notebook.state === "invalid") {
-          toast.error(
-            `${student.studentName}: notebook marks must be between 0 and 5, or AB`,
-          );
-          return;
-        }
-        if (enrichment.state === "invalid") {
-          toast.error(
-            `${student.studentName}: subject enrichment marks must be between 0 and 5, or AB`,
-          );
-          return;
-        }
-        marks.push({
-          studentId: student.studentId,
-          marksObtained: storedMark(written),
-          notebookMarks: storedMark(notebook),
-          enrichmentMarks: storedMark(enrichment),
-        });
-      } else if (writtenRaw) {
-        const written = parseMarkField(writtenRaw, 20);
-        if (written.state === "invalid" || written.state === "empty") {
-          toast.error(`${student.studentName}: marks must be between 0 and 20, or AB`);
-          return;
-        }
-        marks.push({
-          studentId: student.studentId,
-          marksObtained: storedMark(written),
-        });
-      } else {
+      const raw = (scores[student.studentId] ?? "").trim();
+      if (!raw) {
         marks.push({ studentId: student.studentId, cleared: true });
+        continue;
       }
+      const parsed = parseMarkField(raw, selectedCategory.max);
+      if (parsed.state === "invalid" || parsed.state === "empty") {
+        toast.error(
+          `${student.studentName}: marks must be between 0 and ${selectedCategory.max}, or AB`,
+        );
+        return;
+      }
+      marks.push({
+        studentId: student.studentId,
+        marksObtained: storedMark(parsed),
+      });
     }
     setSaving(true);
     try {
@@ -313,8 +284,8 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Report cards</h1>
           <p className="text-sm text-muted-foreground">
-            Choose a class, subject, and category. Half yearly and annual are 80
-            written + 5 notebook + 5 subject enrichment + half of the periodic test.
+            Choose a class, subject, and category. Periodic test, notebook,
+            subject enrichment, and written are each entered on their own.
           </p>
         </div>
       ) : null}
@@ -322,7 +293,8 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
         <CardHeader>
           <CardTitle>Subject marks</CardTitle>
           <CardDescription>
-            Periodic test 1 feeds half yearly. Periodic test 2 feeds annual.
+            Periodic test, notebook, subject enrichment, and written, each
+            numbered 1 and 2.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-3">
@@ -350,7 +322,7 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
               onValueChange={(value) => {
                 setClassId((value as Id<"classes">) || "");
                 setSubjectId("");
-                seededFor.current = "";
+                setSeededKey("");
               }}
             >
               <SelectTrigger className="w-full">
@@ -380,7 +352,7 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
               )}
               onValueChange={(value) => {
                 setSubjectId((value as Id<"subjects">) || "");
-                seededFor.current = "";
+                setSeededKey("");
               }}
             >
               <SelectTrigger className="w-full">
@@ -406,14 +378,9 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
                 CATEGORIES.map((item) => [item.id, item.label]),
               )}
               onValueChange={(value) => {
-                if (
-                  value === "class_test_1" ||
-                  value === "half_yearly" ||
-                  value === "class_test_2" ||
-                  value === "annual"
-                ) {
+                if (isReportCategory(value)) {
                   setCategory(value);
-                  seededFor.current = "";
+                  setSeededKey("");
                 }
               }}
             >
@@ -443,10 +410,7 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
               {subjectName} · {selectedCategory.label}
             </CardTitle>
             <CardDescription>
-              {sheet.classLabel}
-              {selectedCategory.composite
-                ? " · total is out of 100"
-                : " · enter marks out of 20"}
+              {sheet.classLabel} · enter marks out of {selectedCategory.max}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -456,140 +420,36 @@ function TeacherMarksEntry({ showHeading = true }: { showHeading?: boolean }) {
               </p>
             ) : (
               <div className="space-y-4">
-                {sheet.students.map((student) => {
-                  const classTest = selectedCategory.id === "half_yearly"
-                    ? student.classTest1
-                    : selectedCategory.id === "annual"
-                      ? student.classTest2
-                      : null;
-                  const classTestPart =
-                    typeof classTest === "number" ? classTest / 2 : null;
-                  const written = draftComponent(scores[student.studentId]);
-                  const notebook = draftComponent(notebooks[student.studentId]);
-                  const enrichment = draftComponent(enrichments[student.studentId]);
-                  const anyAbsent =
-                    written === "AB" ||
-                    notebook === "AB" ||
-                    enrichment === "AB" ||
-                    classTest === "AB";
-                  const total = anyAbsent
-                    ? null
-                    : (written === "blank" ? 0 : written) +
-                      (notebook === "blank" ? 0 : notebook) +
-                      (enrichment === "blank" ? 0 : enrichment) +
-                      (classTestPart ?? 0);
-                  return (
+                {sheet.students.map((student) => (
                     <div
                       key={student.studentId}
                       className="grid gap-2 border-b pb-3 sm:grid-cols-[180px_1fr] sm:items-center"
                     >
                       <p className="font-medium">{student.studentName}</p>
-                      {selectedCategory.composite ? (
-                        <div className="grid gap-2 sm:grid-cols-5">
-                          <div className="space-y-1">
-                            <Label htmlFor={`written-${student.studentId}`}>
-                              Written / 80
-                            </Label>
-                            <Input
-                              id={`written-${student.studentId}`}
-                              inputMode="text"
-                              value={scores[student.studentId] ?? ""}
-                              onChange={(event) => {
-                                const next = event.target.value;
-                                if (!markWithinMax(next, 80)) {
-                                  return;
-                                }
-                                setScores((current) => ({
-                                  ...current,
-                                  [student.studentId]: normalizeDraft(next),
-                                }));
-                              }}
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label htmlFor={`notebook-${student.studentId}`}>
-                              Notebook / 5
-                            </Label>
-                            <Input
-                              id={`notebook-${student.studentId}`}
-                              inputMode="text"
-                              value={notebooks[student.studentId] ?? ""}
-                              onChange={(event) => {
-                                const next = event.target.value;
-                                if (!markWithinMax(next, 5)) {
-                                  return;
-                                }
-                                setNotebooks((current) => ({
-                                  ...current,
-                                  [student.studentId]: normalizeDraft(next),
-                                }));
-                              }}
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label htmlFor={`enrichment-${student.studentId}`}>
-                              Enrichment / 5
-                            </Label>
-                            <Input
-                              id={`enrichment-${student.studentId}`}
-                              inputMode="text"
-                              value={enrichments[student.studentId] ?? ""}
-                              onChange={(event) => {
-                                const next = event.target.value;
-                                if (!markWithinMax(next, 5)) {
-                                  return;
-                                }
-                                setEnrichments((current) => ({
-                                  ...current,
-                                  [student.studentId]: normalizeDraft(next),
-                                }));
-                              }}
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-sm font-medium">Periodic test / 2</p>
-                            <p className="flex h-9 items-center text-sm text-muted-foreground">
-                              {classTest === "AB"
-                                ? "AB"
-                                : classTestPart === null
-                                  ? "Not entered"
-                                  : formatMark(classTestPart)}
-                            </p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-sm font-medium">Total / 100</p>
-                            <p className="flex h-9 items-center text-sm">
-                              {total === null ? "—" : formatMark(total)}
-                            </p>
-                          </div>
-                        </div>
-                      ) : (
-                        <Input
-                          id={`score-${student.studentId}`}
-                          inputMode="text"
-                          placeholder="Out of 20"
-                          aria-label={`${student.studentName} marks`}
-                          value={scores[student.studentId] ?? ""}
-                          onChange={(event) => {
-                            const next = event.target.value;
-                            if (!markWithinMax(next, 20)) {
-                              return;
-                            }
-                            setScores((current) => ({
-                              ...current,
-                              [student.studentId]: normalizeDraft(next),
-                            }));
-                          }}
-                        />
-                      )}
+                      <Input
+                        id={`score-${student.studentId}`}
+                        inputMode="text"
+                        placeholder={`Out of ${selectedCategory.max}`}
+                        aria-label={`${student.studentName} marks`}
+                        value={scores[student.studentId] ?? ""}
+                        onChange={(event) => {
+                          const next = event.target.value;
+                          if (!markWithinMax(next, selectedCategory.max)) {
+                            return;
+                          }
+                          setScores((current) => ({
+                            ...current,
+                            [student.studentId]: normalizeDraft(next),
+                          }));
+                        }}
+                      />
                     </div>
-                  );
-                })}
+                  ))}
               </div>
             )}
             <Button
               type="button"
-              disabled={saving || sheet.students.length === 0}
+              disabled={saving || !scoresReady || sheet.students.length === 0}
               onClick={() => void onSave()}
             >
               {saving ? "Saving…" : "Save marks"}
@@ -631,19 +491,15 @@ function ReportCardSheet({
   student,
   classLabel,
   categoryTitle,
-  composite,
-  category,
   className,
 }: {
   student: ReportStudent;
   classLabel: string;
   categoryTitle: string;
-  composite: boolean;
-  category: ReportCategory;
   className?: string;
 }) {
   const totals = studentTotals(student.lines);
-  const markColumnCount = composite ? 7 : 4;
+  const markColumnCount = 4;
 
   return (
     <div
@@ -712,42 +568,8 @@ function ReportCardSheet({
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-left">Subject</TableHead>
-                  {composite ? (
-                    <>
-                      <TableHead className={MARK_HEAD}>
-                        <span className="block text-center">
-                          {category === "annual"
-                            ? "Periodic Test II"
-                            : "Periodic Test I"}
-                        </span>
-                        <span className="block text-center font-normal">(10)</span>
-                      </TableHead>
-                      <TableHead className={MARK_HEAD}>
-                        <span className="block text-center">Notebook</span>
-                        <span className="block text-center font-normal">(5)</span>
-                      </TableHead>
-                      <TableHead className={MARK_HEAD}>
-                        <span className="block text-center">Subject Enrichment</span>
-                        <span className="block text-center font-normal">(5)</span>
-                      </TableHead>
-                      <TableHead className={MARK_HEAD}>
-                        <span className="block text-center">
-                          {category === "annual"
-                            ? "Annual"
-                            : category === "half_yearly"
-                              ? "Half Yearly"
-                              : "Marks"}
-                        </span>
-                        <span className="block text-center font-normal">(80)</span>
-                      </TableHead>
-                      <TableHead className={MARK_HEAD}>Total</TableHead>
-                    </>
-                  ) : (
-                    <>
-                      <TableHead className={MARK_HEAD}>Marks</TableHead>
-                      <TableHead className={MARK_HEAD}>Max</TableHead>
-                    </>
-                  )}
+                  <TableHead className={MARK_HEAD}>Marks</TableHead>
+                  <TableHead className={MARK_HEAD}>Max</TableHead>
                   <TableHead className={MARK_HEAD}>Grade</TableHead>
                 </TableRow>
               </TableHeader>
@@ -768,40 +590,12 @@ function ReportCardSheet({
                       <TableCell className="text-left font-black">
                         {line.subjectName}
                       </TableCell>
-                      {composite ? (
-                        <>
-                          <TableCell className={MARK_FIGURE}>
-                            {line.classTestHalf === "AB"
-                              ? "AB"
-                              : line.classTestHalf === null
-                                ? "Not entered"
-                                : formatMark(line.classTestHalf)}
-                          </TableCell>
-                          <TableCell className={MARK_FIGURE}>
-                            {printMark(line.notebook)}
-                          </TableCell>
-                          <TableCell className={MARK_FIGURE}>
-                            {printMark(line.enrichment)}
-                          </TableCell>
-                          <TableCell className={MARK_FIGURE}>
-                            {printMark(line.written)}
-                          </TableCell>
-                          <TableCell className={MARK_FIGURE}>
-                            {typeof line.total === "number"
-                              ? `${formatMark(line.total)} / 100`
-                              : "—"}
-                          </TableCell>
-                        </>
-                      ) : (
-                        <>
-                          <TableCell className={MARK_FIGURE}>
-                            {printMark(line.total)}
-                          </TableCell>
-                          <TableCell className={MARK_FIGURE}>20</TableCell>
-                        </>
-                      )}
                       <TableCell className={MARK_FIGURE}>
-                        {typeof line.total !== "number" || line.maxMarks === 0
+                        {printMark(line.total)}
+                      </TableCell>
+                      <TableCell className={MARK_FIGURE}>{line.maxMarks}</TableCell>
+                      <TableCell className={MARK_FIGURE}>
+                        {typeof line.total !== "number"
                           ? "—"
                           : gradeFor((line.total / line.maxMarks) * 100)}
                       </TableCell>
@@ -931,8 +725,6 @@ export default function ReportCardsPage() {
       ? {
           classLabel: report.classLabel,
           categoryTitle: report.categoryTitle,
-          composite: report.composite,
-          category,
         }
       : null;
 
@@ -1064,12 +856,7 @@ export default function ReportCardsPage() {
                 CATEGORIES.map((item) => [item.id, item.label]),
               )}
               onValueChange={(value) => {
-                if (
-                  value === "class_test_1" ||
-                  value === "half_yearly" ||
-                  value === "class_test_2" ||
-                  value === "annual"
-                ) {
+                if (isReportCategory(value)) {
                   setCategory(value);
                   setStudentId("");
                 }

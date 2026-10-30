@@ -2,6 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
 import { getCurrentUser, isIsoDate, isSchoolAdmin } from "./lib/auth";
+import { assistantIdsOf } from "./lib/timetableAssistants";
 import { dayOfWeekValidator } from "./lib/validators";
 
 type Weekday =
@@ -165,16 +166,19 @@ export const forDate = query({
         mains.add(slot.teacherId);
         mainsByPeriod.set(slot.periodNumber, mains);
       }
-      if (slot.assistantTeacherId) {
+      const assistantIds = assistantIdsOf(slot);
+      if (assistantIds.length > 0) {
         const byTeacher =
           assistantsByPeriod.get(slot.periodNumber) ??
           new Map<Id<"users">, string[]>();
-        const current = byTeacher.get(slot.assistantTeacherId) ?? [];
         const label = await classLabel(ctx, slot.classId, labels);
-        if (!current.includes(label)) {
-          current.push(label);
+        for (const assistantId of assistantIds) {
+          const current = byTeacher.get(assistantId) ?? [];
+          if (!current.includes(label)) {
+            current.push(label);
+          }
+          byTeacher.set(assistantId, current);
         }
-        byTeacher.set(slot.assistantTeacherId, current);
         assistantsByPeriod.set(slot.periodNumber, byTeacher);
       }
     }

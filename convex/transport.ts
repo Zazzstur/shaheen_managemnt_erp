@@ -1,7 +1,56 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./_generated/server";
+import { Doc, Id } from "./_generated/dataModel";
 import { requireSchoolAdmin } from "./lib/auth";
 import { studentName } from "./lib/studentName";
+
+const MAX_SEARCH_LENGTH = 100;
+
+function normalizeSearchTerm(value: string | undefined) {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .slice(0, MAX_SEARCH_LENGTH);
+}
+
+function matchesEnrolledSearch(student: Doc<"students">, term: string) {
+  if (student.status !== "enrolled") {
+    return false;
+  }
+  if (!term) {
+    return true;
+  }
+  const name = studentName(student).toLowerCase().replace(/\s+/g, " ").trim();
+  const admission = student.admissionNumber.toLowerCase().replace(/\s+/g, "");
+  const admissionTerm = term.replace(/ /g, "");
+  return (
+    name.includes(term) ||
+    (admissionTerm.length > 0 && admission.includes(admissionTerm))
+  );
+}
+
+async function enrolledStudentsForRoute(
+  ctx: QueryCtx,
+  routeId: Id<"transportRoutes">,
+) {
+  const route = await ctx.db.get("transportRoutes", routeId);
+  if (!route) {
+    throw new Error("Route not found");
+  }
+  const assignments = await ctx.db
+    .query("studentTransport")
+    .withIndex("by_route", (q) => q.eq("routeId", routeId))
+    .collect();
+  const students: Doc<"students">[] = [];
+  for (const assignment of assignments) {
+    const student = await ctx.db.get("students", assignment.studentId);
+    if (student?.status === "enrolled") {
+      students.push(student);
+    }
+  }
+  return students;
+}
 
 const routeDocValidator = v.object({
   _id: v.id("transportRoutes"),
@@ -102,22 +151,29 @@ export const listStudentRows = query({
   returns: v.array(studentTransportRowValidator),
   handler: async (ctx, args) => {
     await requireSchoolAdmin(ctx);
-    const term = args.search?.trim().toLowerCase().slice(0, 100) ?? "";
-    const students = await ctx.db.query("students").take(80);
+    const term = normalizeSearchTerm(args.search);
+    if (!term && !args.routeId) {
+      return [];
+    }
+    const students = term
+      ? (await ctx.db.query("students").collect()).filter((student) =>
+          matchesEnrolledSearch(student, term),
+        )
+      : await enrolledStudentsForRoute(ctx, args.routeId!);
+    const classLabels = new Map<Id<"classes">, string>();
     const rows = [];
     for (const student of students) {
-      if (student.status !== "enrolled") {
+      if (!matchesEnrolledSearch(student, term)) {
         continue;
       }
-      const name = studentName(student);
-      if (
-        term &&
-        !name.toLowerCase().includes(term) &&
-        !student.admissionNumber.toLowerCase().includes(term)
-      ) {
-        continue;
+      let classLabel = classLabels.get(student.classId);
+      if (classLabel === undefined) {
+        const classroom = await ctx.db.get("classes", student.classId);
+        classLabel = classroom
+          ? `${classroom.name} ${classroom.section}`.trim()
+          : "Unassigned";
+        classLabels.set(student.classId, classLabel);
       }
-      const classroom = await ctx.db.get("classes", student.classId);
       const assignment = await ctx.db
         .query("studentTransport")
         .withIndex("by_student", (q) => q.eq("studentId", student._id))
@@ -134,11 +190,9 @@ export const listStudentRows = query({
       }
       rows.push({
         studentId: student._id,
-        studentName: name,
+        studentName: studentName(student),
         admissionNumber: student.admissionNumber,
-        classLabel: classroom
-          ? `${classroom.name} ${classroom.section}`.trim()
-          : "Unassigned",
+        classLabel,
         assignmentId: assignment?._id,
         routeId: assignment?.routeId,
         routeName: route?.name,
@@ -151,6 +205,13 @@ export const listStudentRows = query({
         hasCustomFee,
       });
     }
+    rows.sort(
+      (left, right) =>
+        left.studentName.localeCompare(right.studentName) ||
+        left.admissionNumber.localeCompare(right.admissionNumber, undefined, {
+          numeric: true,
+        }),
+    );
     return rows;
   },
 });

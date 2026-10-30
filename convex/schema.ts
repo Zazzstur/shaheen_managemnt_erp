@@ -112,14 +112,25 @@ export default defineSchema({
     subjectId: v.id("subjects"),
     teacherId: v.optional(v.id("users")),
     assistantTeacherId: v.optional(v.id("users")),
+    assistantTeacherIds: v.optional(v.array(v.id("users"))),
   })
     .index("by_class", ["classId"])
     .index("by_class_day_period", ["classId", "dayOfWeek", "periodNumber"])
     .index("by_teacher", ["teacherId"])
-    .index("by_assistant_teacher", ["assistantTeacherId"])
     .index("by_day", ["dayOfWeek"]),
 
   homework: defineTable({
+    classId: v.id("classes"),
+    subjectId: v.id("subjects"),
+    periodNumber: v.optional(v.number()),
+    date: v.string(),
+    message: v.string(),
+    enteredBy: v.id("users"),
+  })
+    .index("by_class_and_date", ["classId", "date"])
+    .index("by_class_subject_and_date", ["classId", "subjectId", "date"]),
+
+  classwork: defineTable({
     classId: v.id("classes"),
     subjectId: v.id("subjects"),
     periodNumber: v.optional(v.number()),

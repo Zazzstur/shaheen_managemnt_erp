@@ -47,7 +47,7 @@ export default function TimetablePage() {
     me?.role === "super_admin" || me?.role === "teacher" ? {} : "skip",
   );
   const [classId, setClassId] = useState<Id<"classes"> | "">("");
-  const [assistantOpen, setAssistantOpen] = useState<Record<string, boolean>>(
+  const [assistantRows, setAssistantRows] = useState<Record<string, number>>(
     {},
   );
   const slots = useQuery(
@@ -55,6 +55,7 @@ export default function TimetablePage() {
     classId ? { classId } : "skip",
   );
   const upsertSlot = useMutation(api.timetables.upsertSlot);
+  const clearSlot = useMutation(api.timetables.clearSlot);
   const isAdmin = me ? isSchoolAdmin(me) : false;
   const isTeacher = me?.role === "teacher";
   const mySlots = useQuery(api.timetables.listMine, isTeacher ? {} : "skip");
@@ -64,8 +65,7 @@ export default function TimetablePage() {
     periodNumber: number;
     subjectId: Id<"subjects">;
     teacherId?: Id<"users">;
-    assistantTeacherId?: Id<"users">;
-    clearAssistantTeacher?: boolean;
+    assistantTeacherIds?: Id<"users">[];
   }) => {
     if (!classId) {
       toast.error("Select a class first");
@@ -76,12 +76,27 @@ export default function TimetablePage() {
       dayOfWeek: args.dayOfWeek,
       periodNumber: args.periodNumber,
       subjectId: args.subjectId,
-      teacherId: args.teacherId,
-      ...(args.assistantTeacherId
-        ? { assistantTeacherId: args.assistantTeacherId }
+      ...(args.teacherId ? { teacherId: args.teacherId } : {}),
+      ...(args.assistantTeacherIds !== undefined
+        ? { assistantTeacherIds: args.assistantTeacherIds }
         : {}),
-      ...(args.clearAssistantTeacher ? { clearAssistantTeacher: true } : {}),
     });
+  };
+
+  const unassignSlot = async (
+    day: (typeof DAYS)[number],
+    period: number,
+  ) => {
+    if (!classId) {
+      toast.error("Select a class first");
+      return;
+    }
+    await clearSlot({
+      classId,
+      dayOfWeek: day,
+      periodNumber: period,
+    });
+    setAssistantRows((rows) => ({ ...rows, [`${day}-${period}`]: 0 }));
   };
 
   const cell = (day: (typeof DAYS)[number], period: number) =>
@@ -228,6 +243,16 @@ export default function TimetablePage() {
                       <td className="border p-2 font-medium">{period}</td>
                       {DAYS.map((day) => {
                         const assigned = cell(day, period);
+                        const cellKey = `${day}-${period}`;
+                        const assistantIds =
+                          assigned?.assistantTeacherIds ?? [];
+                        const visibleAssistants = Math.min(
+                          2,
+                          Math.max(
+                            assistantIds.length,
+                            assistantRows[cellKey] ?? 0,
+                          ),
+                        );
                         return (
                           <td key={day} className="border p-2 align-top">
                             {assigned ? (
@@ -238,11 +263,16 @@ export default function TimetablePage() {
                                 <p className="text-muted-foreground">
                                   {assigned.teacherName}
                                 </p>
-                                {assigned.assistantTeacherName ? (
-                                  <p className="text-muted-foreground">
-                                    {assigned.assistantTeacherName}
-                                  </p>
-                                ) : null}
+                                {assigned.assistantTeacherNames.map(
+                                  (name, index) => (
+                                    <p
+                                      key={`${assigned._id}-assistant-${index}`}
+                                      className="text-muted-foreground"
+                                    >
+                                      {name}
+                                    </p>
+                                  ),
+                                )}
                               </div>
                             ) : (
                               <p className="text-muted-foreground">Free</p>
@@ -253,6 +283,13 @@ export default function TimetablePage() {
                                   subjects={subjects ?? []}
                                   selectedId={assigned?.subjectId}
                                   selectedName={assigned?.subjectName}
+                                  onUnassign={async () => {
+                                    try {
+                                      await unassignSlot(day, period);
+                                    } catch (error) {
+                                      toast.error(mutationResult(error).message);
+                                    }
+                                  }}
                                   onSelect={async (subjectId) => {
                                     try {
                                       await assignSlot({
@@ -269,8 +306,15 @@ export default function TimetablePage() {
                                 <div className="flex items-center gap-1">
                                   <div className="min-w-0 flex-1">
                                     <PersonField
-                                      people={(teachers ?? []).map(
-                                        (teacher) => ({
+                                      people={(teachers ?? [])
+                                        .filter(
+                                          (teacher) =>
+                                            !(
+                                              assigned?.assistantTeacherIds ??
+                                              []
+                                            ).includes(teacher._id),
+                                        )
+                                        .map((teacher) => ({
                                           id: teacher._id,
                                           label:
                                             teacher.name ??
@@ -282,10 +326,13 @@ export default function TimetablePage() {
                                           ]
                                             .filter(Boolean)
                                             .join(" "),
-                                        }),
-                                      )}
+                                        }))}
                                       selectedId={assigned?.teacherId}
-                                      selectedLabel={assigned?.teacherName}
+                                      selectedLabel={
+                                        assigned?.teacherId
+                                          ? assigned.teacherName
+                                          : undefined
+                                      }
                                       placeholder="Teacher"
                                       searchPlaceholder="Search teachers"
                                       listLabel="Teachers"
@@ -295,6 +342,16 @@ export default function TimetablePage() {
                                           subjects?.[0]?._id;
                                         if (!subjectId) {
                                           toast.error("Add a subject first");
+                                          return;
+                                        }
+                                        if (
+                                          (
+                                            assigned?.assistantTeacherIds ?? []
+                                          ).includes(teacherId as Id<"users">)
+                                        ) {
+                                          toast.error(
+                                            "Assistant teacher must be different from the main teacher",
+                                          );
                                           return;
                                         }
                                         void assignSlot({
@@ -310,121 +367,185 @@ export default function TimetablePage() {
                                       }}
                                     />
                                   </div>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="icon"
-                                    aria-label="Add assistant teacher"
-                                    onClick={() => {
-                                      if (!assigned?.teacherId) {
-                                        toast.error(
-                                          "Choose the main teacher first",
-                                        );
-                                        return;
-                                      }
-                                      setAssistantOpen((open) => ({
-                                        ...open,
-                                        [`${day}-${period}`]: true,
-                                      }));
-                                    }}
-                                  >
-                                    <Plus />
-                                  </Button>
-                                </div>
-                                {assistantOpen[`${day}-${period}`] ||
-                                assigned?.assistantTeacherId ? (
-                                  <div className="flex items-center gap-1">
-                                    <div className="min-w-0 flex-1">
-                                      <PersonField
-                                        people={(teachers ?? [])
-                                          .filter(
-                                            (teacher) =>
-                                              teacher._id !==
-                                              assigned?.teacherId,
-                                          )
-                                          .map((teacher) => ({
-                                            id: teacher._id,
-                                            label:
-                                              teacher.name ??
-                                              teacher.email ??
-                                              "Unnamed",
-                                            searchText: [
-                                              teacher.name,
-                                              teacher.email,
-                                            ]
-                                              .filter(Boolean)
-                                              .join(" "),
-                                          }))}
-                                        selectedId={
-                                          assigned?.assistantTeacherId
-                                        }
-                                        selectedLabel={
-                                          assigned?.assistantTeacherName
-                                        }
-                                        placeholder="Assistant teacher"
-                                        searchPlaceholder="Search assistant teachers"
-                                        listLabel="Assistant teachers"
-                                        onSelect={(assistantTeacherId) => {
-                                          const subjectId =
-                                            assigned?.subjectId;
-                                          if (
-                                            !subjectId ||
-                                            !assigned?.teacherId
-                                          ) {
-                                            toast.error(
-                                              "Choose the main teacher first",
-                                            );
-                                            return;
-                                          }
-                                          void assignSlot({
-                                            dayOfWeek: day,
-                                            periodNumber: period,
-                                            subjectId,
-                                            teacherId: assigned.teacherId,
-                                            assistantTeacherId:
-                                              assistantTeacherId as Id<"users">,
-                                          }).catch((error) =>
-                                            toast.error(
-                                              mutationResult(error).message,
-                                            ),
-                                          );
-                                        }}
-                                      />
-                                    </div>
+                                  {visibleAssistants < 2 ? (
                                     <Button
                                       type="button"
                                       variant="outline"
                                       size="icon"
-                                      aria-label="Remove assistant teacher"
+                                      aria-label="Add assistant teacher"
                                       onClick={() => {
-                                        const key = `${day}-${period}`;
-                                        setAssistantOpen((open) => ({
-                                          ...open,
-                                          [key]: false,
-                                        }));
-                                        if (
-                                          !assigned?.assistantTeacherId ||
-                                          !assigned.subjectId
-                                        ) {
+                                        if (!assigned?.subjectId) {
+                                          toast.error("Choose a subject first");
                                           return;
                                         }
-                                        void assignSlot({
-                                          dayOfWeek: day,
-                                          periodNumber: period,
-                                          subjectId: assigned.subjectId,
-                                          teacherId: assigned.teacherId,
-                                          clearAssistantTeacher: true,
-                                        }).catch((error) =>
+                                        if (!assigned.teacherId) {
                                           toast.error(
-                                            mutationResult(error).message,
-                                          ),
-                                        );
+                                            "Choose the main teacher first",
+                                          );
+                                          return;
+                                        }
+                                        setAssistantRows((rows) => ({
+                                          ...rows,
+                                          [cellKey]: visibleAssistants + 1,
+                                        }));
                                       }}
                                     >
-                                      <Minus />
+                                      <Plus />
                                     </Button>
-                                  </div>
-                                ) : null}
+                                  ) : null}
+                                </div>
+                                {Array.from(
+                                  { length: visibleAssistants },
+                                  (_, index) => {
+                                    const selectedAssistantId =
+                                      assistantIds[index];
+                                    return (
+                                      <div
+                                        key={`${cellKey}-assistant-${index}`}
+                                        className="flex items-center gap-1"
+                                      >
+                                        <div className="min-w-0 flex-1">
+                                          <PersonField
+                                            people={(teachers ?? [])
+                                              .filter(
+                                                (teacher) =>
+                                                  teacher._id !==
+                                                    assigned?.teacherId &&
+                                                  !assistantIds.some(
+                                                    (assistantId, assistantIndex) =>
+                                                      assistantIndex !== index &&
+                                                      assistantId === teacher._id,
+                                                  ),
+                                              )
+                                              .map((teacher) => ({
+                                                id: teacher._id,
+                                                label:
+                                                  teacher.name ??
+                                                  teacher.email ??
+                                                  "Unnamed",
+                                                searchText: [
+                                                  teacher.name,
+                                                  teacher.email,
+                                                ]
+                                                  .filter(Boolean)
+                                                  .join(" "),
+                                              }))}
+                                            selectedId={selectedAssistantId}
+                                            selectedLabel={
+                                              assigned?.assistantTeacherNames[
+                                                index
+                                              ]
+                                            }
+                                            placeholder={
+                                              index === 0
+                                                ? "Assistant teacher"
+                                                : "Second assistant"
+                                            }
+                                            searchPlaceholder="Search assistant teachers"
+                                            listLabel="Assistant teachers"
+                                            onSelect={(assistantTeacherId) => {
+                                              const subjectId =
+                                                assigned?.subjectId;
+                                              if (
+                                                !subjectId ||
+                                                !assigned?.teacherId
+                                              ) {
+                                                toast.error(
+                                                  "Choose the main teacher first",
+                                                );
+                                                return;
+                                              }
+                                              const nextId =
+                                                assistantTeacherId as Id<"users">;
+                                              if (
+                                                nextId === assigned.teacherId
+                                              ) {
+                                                toast.error(
+                                                  "Assistant teacher must be different from the main teacher",
+                                                );
+                                                return;
+                                              }
+                                              if (
+                                                assistantIds.some(
+                                                  (assistantId, assistantIndex) =>
+                                                    assistantIndex !== index &&
+                                                    assistantId === nextId,
+                                                )
+                                              ) {
+                                                toast.error(
+                                                  "That assistant is already assigned to this period",
+                                                );
+                                                return;
+                                              }
+                                              const next = assistantIds.slice();
+                                              next[index] = nextId;
+                                              const compact = next.filter(
+                                                (id): id is Id<"users"> =>
+                                                  id !== undefined,
+                                              );
+                                              if (compact.length > 2) {
+                                                toast.error(
+                                                  "A class period can have at most two assistant teachers",
+                                                );
+                                                return;
+                                              }
+                                              void assignSlot({
+                                                dayOfWeek: day,
+                                                periodNumber: period,
+                                                subjectId,
+                                                teacherId: assigned.teacherId,
+                                                assistantTeacherIds: compact,
+                                              }).catch((error) =>
+                                                toast.error(
+                                                  mutationResult(error).message,
+                                                ),
+                                              );
+                                            }}
+                                          />
+                                        </div>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="icon"
+                                          aria-label={
+                                            index === 0
+                                              ? "Remove assistant teacher"
+                                              : "Remove second assistant teacher"
+                                          }
+                                          onClick={() => {
+                                            const next = assistantIds.filter(
+                                              (_, assistantIndex) =>
+                                                assistantIndex !== index,
+                                            );
+                                            setAssistantRows((rows) => ({
+                                              ...rows,
+                                              [cellKey]: next.length,
+                                            }));
+                                            if (
+                                              !selectedAssistantId ||
+                                              !assigned?.subjectId
+                                            ) {
+                                              return;
+                                            }
+                                            void assignSlot({
+                                              dayOfWeek: day,
+                                              periodNumber: period,
+                                              subjectId: assigned.subjectId,
+                                              teacherId: assigned.teacherId,
+                                              assistantTeacherIds: next,
+                                            }).catch((error) =>
+                                              toast.error(
+                                                mutationResult(error).message,
+                                              ),
+                                            );
+                                          }}
+                                        >
+                                          <Minus />
+                                        </Button>
+                                      </div>
+                                    );
+                                  },
+                                )}
                               </div>
                             ) : null}
                           </td>

@@ -64,10 +64,10 @@ const LINKS = [
     staffRoles: ["incharge"],
   },
   {
-    href: "/homework/classes",
-    title: "Class homework",
-    description: "Review and share homework for your classes.",
-    roles: ["teacher"],
+    href: "/assignment",
+    title: "Assignment",
+    description: "Review and edit homework and classwork by class and date.",
+    roles: ["super_admin", "teacher"],
     staffRoles: ["incharge"],
   },
   {
@@ -83,10 +83,23 @@ const LINKS = [
     roles: ["super_admin", "teacher", "student", "parent"],
   },
   {
+    href: "/admin/teachers-timetable",
+    title: "Teachers timetable",
+    description: "Look up any teacher's weekly schedule.",
+    roles: ["super_admin"],
+    alsoStaffRoles: ["incharge"],
+  },
+  {
+    href: "/classwork",
+    title: "Classwork",
+    description: "Enter the day's classwork from your timetable.",
+    roles: ["teacher"],
+  },
+  {
     href: "/homework",
     title: "Homework",
-    description: "Enter or review the day's homework by class and subject.",
-    roles: ["super_admin", "teacher"],
+    description: "Enter the day's homework from your timetable.",
+    roles: ["teacher"],
   },
   {
     href: "/admin/fees",

@@ -1,7 +1,17 @@
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
-import { requireRoles, requireSchoolAdmin } from "./lib/auth";
+import {
+  getCurrentUser,
+  isIncharge,
+  isSchoolAdmin,
+  requireRoles,
+  requireSchoolAdmin,
+} from "./lib/auth";
+import {
+  assistantIdsOf,
+  slotsTaughtBy,
+} from "./lib/timetableAssistants";
 import { dayOfWeekValidator, userDocValidator } from "./lib/validators";
 
 const slotValidator = v.object({
@@ -12,10 +22,10 @@ const slotValidator = v.object({
   periodNumber: v.number(),
   subjectId: v.id("subjects"),
   teacherId: v.optional(v.id("users")),
-  assistantTeacherId: v.optional(v.id("users")),
+  assistantTeacherIds: v.array(v.id("users")),
   subjectName: v.string(),
   teacherName: v.string(),
-  assistantTeacherName: v.optional(v.string()),
+  assistantTeacherNames: v.array(v.string()),
 });
 
 export const listTeachers = query({
@@ -50,9 +60,14 @@ export const listForClass = query({
       const teacher = slot.teacherId
         ? await ctx.db.get("users", slot.teacherId)
         : null;
-      const assistant = slot.assistantTeacherId
-        ? await ctx.db.get("users", slot.assistantTeacherId)
-        : null;
+      const assistantTeacherIds = assistantIdsOf(slot);
+      const assistantTeacherNames: string[] = [];
+      for (const assistantId of assistantTeacherIds) {
+        const assistant = await ctx.db.get("users", assistantId);
+        assistantTeacherNames.push(
+          assistant?.name ?? assistant?.email ?? "Unassigned",
+        );
+      }
       result.push({
         _id: slot._id,
         _creationTime: slot._creationTime,
@@ -61,14 +76,10 @@ export const listForClass = query({
         periodNumber: slot.periodNumber,
         subjectId: slot.subjectId,
         ...(slot.teacherId ? { teacherId: slot.teacherId } : {}),
-        ...(slot.assistantTeacherId
-          ? { assistantTeacherId: slot.assistantTeacherId }
-          : {}),
+        assistantTeacherIds,
         subjectName: subject?.name ?? "Unknown subject",
         teacherName: teacher?.name ?? teacher?.email ?? "Unassigned",
-        ...(assistant
-          ? { assistantTeacherName: assistant.name ?? assistant.email }
-          : {}),
+        assistantTeacherNames,
       });
     }
     return result;
@@ -128,6 +139,79 @@ export const myTeachingAssignments = query({
   },
 });
 
+const timetableTeacherValidator = v.object({
+  _id: v.id("users"),
+  name: v.string(),
+});
+
+const viewedTeacherSlotValidator = v.object({
+  _id: v.id("timetables"),
+  dayOfWeek: dayOfWeekValidator,
+  periodNumber: v.number(),
+  classLabel: v.string(),
+  subjectName: v.string(),
+  assignment: v.union(v.literal("main"), v.literal("assistant")),
+});
+
+async function requireTimetableViewer(ctx: QueryCtx | MutationCtx) {
+  const user = await getCurrentUser(ctx);
+  if (!isSchoolAdmin(user) && !isIncharge(user)) {
+    throw new Error("Unauthorized: insufficient role");
+  }
+  return user;
+}
+
+export const listTimetableTeachers = query({
+  args: {},
+  returns: v.array(timetableTeacherValidator),
+  handler: async (ctx) => {
+    await requireTimetableViewer(ctx);
+    const teachers = await ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "teacher"))
+      .take(200);
+    const admins = await ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "super_admin"))
+      .take(50);
+    return [...teachers, ...admins]
+      .map((teacher) => ({
+        _id: teacher._id,
+        name: teacher.name ?? teacher.email ?? "Unnamed",
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  },
+});
+
+export const listForTeacher = query({
+  args: { teacherId: v.id("users") },
+  returns: v.array(viewedTeacherSlotValidator),
+  handler: async (ctx, args) => {
+    await requireTimetableViewer(ctx);
+    await assertStaffTeacher(ctx, args.teacherId);
+    const slots = await slotsTaughtBy(ctx, args.teacherId);
+    const result = [];
+    for (const slot of slots) {
+      const classroom = await ctx.db.get("classes", slot.classId);
+      const subject = await ctx.db.get("subjects", slot.subjectId);
+      result.push({
+        _id: slot._id,
+        dayOfWeek: slot.dayOfWeek,
+        periodNumber: slot.periodNumber,
+        classLabel: classroom
+          ? `${classroom.name} ${classroom.section}`.trim()
+          : "Unassigned class",
+        subjectName: subject?.name ?? "Unknown subject",
+        assignment:
+          slot.teacherId === args.teacherId
+            ? ("main" as const)
+            : ("assistant" as const),
+      });
+    }
+    return result;
+  },
+});
+
 export const listMine = query({
   args: {},
   returns: v.array(teacherSlotValidator),
@@ -152,6 +236,44 @@ export const listMine = query({
   },
 });
 
+export const clearSlot = mutation({
+  args: {
+    classId: v.id("classes"),
+    dayOfWeek: dayOfWeekValidator,
+    periodNumber: v.number(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireSchoolAdmin(ctx);
+    assertPeriodNumber(args.periodNumber);
+    const classroom = await ctx.db.get("classes", args.classId);
+    if (!classroom) {
+      throw new Error("Class not found");
+    }
+    const existing = await ctx.db
+      .query("timetables")
+      .withIndex("by_class_day_period", (q) =>
+        q
+          .eq("classId", args.classId)
+          .eq("dayOfWeek", args.dayOfWeek)
+          .eq("periodNumber", args.periodNumber),
+      )
+      .unique();
+    if (!existing) {
+      return null;
+    }
+    const covers = await ctx.db
+      .query("freeClassCovers")
+      .filter((q) => q.eq(q.field("timetableId"), existing._id))
+      .take(50);
+    for (const cover of covers) {
+      await ctx.db.delete("freeClassCovers", cover._id);
+    }
+    await ctx.db.delete("timetables", existing._id);
+    return null;
+  },
+});
+
 export const upsertSlot = mutation({
   args: {
     classId: v.id("classes"),
@@ -159,15 +281,12 @@ export const upsertSlot = mutation({
     periodNumber: v.number(),
     subjectId: v.id("subjects"),
     teacherId: v.optional(v.id("users")),
-    assistantTeacherId: v.optional(v.id("users")),
-    clearAssistantTeacher: v.optional(v.boolean()),
+    assistantTeacherIds: v.optional(v.array(v.id("users"))),
   },
   returns: v.id("timetables"),
   handler: async (ctx, args) => {
     await requireSchoolAdmin(ctx);
-    if (!Number.isInteger(args.periodNumber) || args.periodNumber < 1 || args.periodNumber > 8) {
-      throw new Error("Period number must be between 1 and 8");
-    }
+    assertPeriodNumber(args.periodNumber);
     const classroom = await ctx.db.get("classes", args.classId);
     if (!classroom) {
       throw new Error("Class not found");
@@ -179,9 +298,6 @@ export const upsertSlot = mutation({
     if (args.teacherId) {
       await assertStaffTeacher(ctx, args.teacherId);
     }
-    if (args.assistantTeacherId) {
-      await assertStaffTeacher(ctx, args.assistantTeacherId);
-    }
     const existing = await ctx.db
       .query("timetables")
       .withIndex("by_class_day_period", (q) =>
@@ -192,22 +308,21 @@ export const upsertSlot = mutation({
       )
       .unique();
     const teacherId = args.teacherId ?? existing?.teacherId;
-    if (
-      args.assistantTeacherId &&
-      teacherId &&
-      args.assistantTeacherId === teacherId
-    ) {
-      throw new Error("Assistant teacher must be different from the main teacher");
-    }
+    const assistantTeacherIds = await normalizeAssistants(
+      ctx,
+      args.assistantTeacherIds ??
+        (existing ? assistantIdsOf(existing) : []),
+      teacherId,
+    );
+    const assistantFields =
+      assistantTeacherIds.length > 0
+        ? { assistantTeacherIds, assistantTeacherId: undefined }
+        : { assistantTeacherIds: undefined, assistantTeacherId: undefined };
     if (existing) {
       await ctx.db.patch("timetables", existing._id, {
         subjectId: args.subjectId,
         ...(args.teacherId ? { teacherId: args.teacherId } : {}),
-        ...(args.clearAssistantTeacher
-          ? { assistantTeacherId: undefined }
-          : args.assistantTeacherId
-            ? { assistantTeacherId: args.assistantTeacherId }
-            : {}),
+        ...assistantFields,
       });
       return existing._id;
     }
@@ -217,12 +332,16 @@ export const upsertSlot = mutation({
       periodNumber: args.periodNumber,
       subjectId: args.subjectId,
       ...(args.teacherId ? { teacherId: args.teacherId } : {}),
-      ...(args.assistantTeacherId
-        ? { assistantTeacherId: args.assistantTeacherId }
-        : {}),
+      ...(assistantTeacherIds.length > 0 ? { assistantTeacherIds } : {}),
     });
   },
 });
+
+function assertPeriodNumber(periodNumber: number) {
+  if (!Number.isInteger(periodNumber) || periodNumber < 1 || periodNumber > 8) {
+    throw new Error("Period number must be between 1 and 8");
+  }
+}
 
 async function assertStaffTeacher(
   ctx: QueryCtx | MutationCtx,
@@ -237,28 +356,26 @@ async function assertStaffTeacher(
   }
 }
 
-async function slotsTaughtBy(
+async function normalizeAssistants(
   ctx: QueryCtx | MutationCtx,
-  teacherId: Id<"users">,
+  assistantTeacherIds: Id<"users">[],
+  teacherId: Id<"users"> | undefined,
 ) {
-  const main = await ctx.db
-    .query("timetables")
-    .withIndex("by_teacher", (q) => q.eq("teacherId", teacherId))
-    .take(200);
-  const assisting = await ctx.db
-    .query("timetables")
-    .withIndex("by_assistant_teacher", (q) =>
-      q.eq("assistantTeacherId", teacherId),
-    )
-    .take(200);
-  const seen = new Set<string>();
-  const slots = [];
-  for (const slot of [...main, ...assisting]) {
-    if (seen.has(slot._id)) {
-      continue;
-    }
-    seen.add(slot._id);
-    slots.push(slot);
+  if (assistantTeacherIds.length > 2) {
+    throw new Error("A class period can have at most two assistant teachers");
   }
-  return slots;
+  const seen = new Set<Id<"users">>();
+  for (const assistantId of assistantTeacherIds) {
+    if (seen.has(assistantId)) {
+      throw new Error("The same assistant teacher cannot be assigned twice");
+    }
+    seen.add(assistantId);
+    if (teacherId && assistantId === teacherId) {
+      throw new Error(
+        "Assistant teacher must be different from the main teacher",
+      );
+    }
+    await assertStaffTeacher(ctx, assistantId);
+  }
+  return assistantTeacherIds;
 }

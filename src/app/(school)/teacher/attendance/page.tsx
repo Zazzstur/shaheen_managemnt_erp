@@ -33,6 +33,20 @@ import {
 
 type AttendanceStatus = "present" | "absent" | "late";
 
+function attendanceStatusTriggerClass(status: AttendanceStatus) {
+  if (status === "present") {
+    return "border-green-200 bg-green-50 text-green-700 hover:bg-green-50 dark:border-green-800 dark:bg-green-950 dark:text-green-300 dark:hover:bg-green-950 [&_svg]:text-green-700 dark:[&_svg]:text-green-300";
+  }
+  if (status === "absent") {
+    return "border-red-200 bg-red-50 text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-red-950 dark:text-red-300 dark:hover:bg-red-950 [&_svg]:text-red-700 dark:[&_svg]:text-red-300";
+  }
+  return undefined;
+}
+
+const PRESENT_ITEM_CLASS =
+  "text-green-700 focus:bg-green-50 focus:text-green-700";
+const ABSENT_ITEM_CLASS = "text-red-700 focus:bg-red-50 focus:text-red-700";
+
 function todayIso() {
   const now = new Date();
   const month = String(now.getMonth() + 1).padStart(2, "0");
@@ -297,12 +311,18 @@ function ClassTeacherAttendance() {
                           }
                         }}
                       >
-                        <SelectTrigger className="w-40">
+                        <SelectTrigger
+                          className={`w-40 ${attendanceStatusTriggerClass(row.current) ?? ""}`}
+                        >
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="present">Present</SelectItem>
-                          <SelectItem value="absent">Absent</SelectItem>
+                          <SelectItem value="present" className={PRESENT_ITEM_CLASS}>
+                            Present
+                          </SelectItem>
+                          <SelectItem value="absent" className={ABSENT_ITEM_CLASS}>
+                            Absent
+                          </SelectItem>
                           <SelectItem value="late">Late</SelectItem>
                         </SelectContent>
                       </Select>

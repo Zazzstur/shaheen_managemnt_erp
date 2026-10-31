@@ -70,6 +70,13 @@ export const discountTypeValidator = v.union(
   v.literal("amount"),
 );
 
+/** How a one-time academic collection discount is spread across the fee year. */
+export const collectionDiscountMethodValidator = v.union(
+  v.literal("equal"),
+  v.literal("first"),
+  v.literal("last"),
+);
+
 export const extraFeeValidator = v.object({
   label: v.string(),
   amount: v.number(),

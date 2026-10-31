@@ -5,12 +5,13 @@ import { useAuthActions, useConvexAuth } from "@convex-dev/auth/react";
 import { api } from "@convex/_generated/api";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bus,
   CalendarDays,
   CalendarRange,
   CalendarOff,
+  ChevronDown,
   ClipboardCheck,
   ClipboardList,
   ContactRound,
@@ -141,6 +142,125 @@ const NAV = [
   },
 ] as const;
 
+const STUDENT_LINKS = [
+  {
+    href: "/students",
+    label: "Student details",
+    roles: ["super_admin", "teacher"],
+  },
+  {
+    href: "/students/class-change",
+    label: "Class change",
+    roles: ["super_admin"],
+  },
+  {
+    href: "/students/transfer-certificate",
+    label: "Transfer certificate",
+    roles: ["super_admin"],
+  },
+] as const;
+
+function StudentsNav({
+  role,
+  staffRole,
+  onNavigate,
+}: {
+  role: string;
+  staffRole?: string;
+  onNavigate?: () => void;
+}) {
+  const pathname = usePathname();
+  const links = STUDENT_LINKS.filter((item) =>
+    canOpenNavItem(item, role, staffRole),
+  );
+  const sectionActive = links.some((item) => pathname === item.href);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (pathname.startsWith("/students/") && pathname !== "/students") {
+      setOpen(true);
+    }
+  }, [pathname]);
+
+  if (links.length === 0) {
+    return null;
+  }
+
+  const parentActive = !open && sectionActive;
+
+  function toggle() {
+    setOpen((value) => !value);
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div
+        className={cn(
+          "flex cursor-pointer items-center rounded-lg",
+          parentActive
+            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            : "text-sidebar-foreground hover:bg-sidebar-accent/70",
+        )}
+        onClick={toggle}
+      >
+        <ContactRound className="ml-3 size-4 shrink-0" />
+        <Link
+          href="/students"
+          onClick={(event) => {
+            event.stopPropagation();
+            onNavigate?.();
+          }}
+          className={cn(
+            "px-2 py-2 text-sm font-medium",
+            parentActive
+              ? "text-sidebar-accent-foreground"
+              : "text-sidebar-foreground",
+          )}
+        >
+          Students
+        </Link>
+        <button
+          type="button"
+          className="ml-auto mr-1 rounded-md p-1.5 hover:bg-sidebar-accent/70"
+          aria-expanded={open}
+          aria-label={open ? "Collapse Students" : "Expand Students"}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggle();
+          }}
+        >
+          <ChevronDown
+            className={cn(
+              "size-4 transition-transform",
+              open ? "rotate-180" : "rotate-0",
+            )}
+          />
+        </button>
+      </div>
+      {open
+        ? links.map((item) => {
+            const active = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={onNavigate}
+                className={cn(
+                  "rounded-lg py-2 pr-3 pl-9 text-sm font-medium transition-colors",
+                  active
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground hover:bg-sidebar-accent/70",
+                )}
+              >
+                {item.label}
+              </Link>
+            );
+          })
+        : null}
+    </div>
+  );
+}
+
 function NavLinks({
   role,
   staffRole,
@@ -159,6 +279,16 @@ function NavLinks({
         }
         return canOpenNavItem(item, role, staffRole);
       }).map((item) => {
+        if (item.href === "/students") {
+          return (
+            <StudentsNav
+              key={item.href}
+              role={role}
+              staffRole={staffRole}
+              onNavigate={onNavigate}
+            />
+          );
+        }
         const Icon = item.icon;
         const active = pathname === item.href;
         return (

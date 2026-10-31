@@ -1,10 +1,11 @@
 import { paginationOptsValidator } from "convex/server";
 import { ConvexError, v } from "convex/values";
 import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
+import { academicSchedule } from "./lib/classHistory";
 import {
   academicFeeBreakdown,
+  academicMonthDiscounts,
   buildFeeAccount,
-  feeScheduleWindow,
   monthKeyFromTimestamp,
 } from "./lib/feeLedger";
 import { Doc, Id } from "./_generated/dataModel";
@@ -900,6 +901,54 @@ const directoryFeeFilter = v.union(
   v.literal("none"),
 );
 
+const MAX_DIRECTORY_SEARCH_LENGTH = 100;
+
+function normalizeDirectorySearch(value: string | undefined) {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .slice(0, MAX_DIRECTORY_SEARCH_LENGTH);
+}
+
+function matchesDirectorySearch(
+  student: {
+    fullName?: string;
+    firstName?: string;
+    lastName?: string;
+    admissionNumber: string;
+  },
+  term: string,
+) {
+  if (!term) {
+    return true;
+  }
+  const name = studentName(student).toLowerCase().replace(/\s+/g, " ").trim();
+  const admission = student.admissionNumber.toLowerCase().replace(/\s+/g, "");
+  const admissionTerm = term.replace(/ /g, "");
+  return (
+    name.includes(term) ||
+    (admissionTerm.length > 0 && admission.includes(admissionTerm))
+  );
+}
+
+async function studentsForDirectory(
+  ctx: QueryCtx,
+  classId: Id<"classes"> | undefined,
+  term: string,
+) {
+  if (classId) {
+    const byClass = ctx.db
+      .query("students")
+      .withIndex("by_class", (q) => q.eq("classId", classId));
+    return term ? await byClass.collect() : await byClass.take(80);
+  }
+  if (term) {
+    return await ctx.db.query("students").collect();
+  }
+  return await ctx.db.query("students").take(80);
+}
+
 const directoryInvoiceValidator = v.object({
   _id: v.id("fees"),
   invoiceNumber: v.string(),
@@ -1055,6 +1104,7 @@ export const directory = query({
   args: {
     classId: v.optional(v.id("classes")),
     feeFilter: v.optional(directoryFeeFilter),
+    search: v.optional(v.string()),
     asOf: v.string(),
   },
   returns: v.array(directoryRowValidator),
@@ -1063,16 +1113,15 @@ export const directory = query({
     if (!isIsoDate(args.asOf)) {
       throw new Error("Date must be YYYY-MM-DD");
     }
-    const students = args.classId
-      ? await ctx.db
-          .query("students")
-          .withIndex("by_class", (q) => q.eq("classId", args.classId!))
-          .take(80)
-      : await ctx.db.query("students").take(80);
+    const term = normalizeDirectorySearch(args.search);
+    const students = await studentsForDirectory(ctx, args.classId, term);
 
     const rows = [];
     for (const student of students) {
       if (student.status !== "enrolled") {
+        continue;
+      }
+      if (!matchesDirectorySearch(student, term)) {
         continue;
       }
       const classroom = await ctx.db.get("classes", student.classId);
@@ -1145,20 +1194,20 @@ const teacherDirectoryRowValidator = v.object({
 export const teacherDirectory = query({
   args: {
     classId: v.optional(v.id("classes")),
+    search: v.optional(v.string()),
   },
   returns: v.array(teacherDirectoryRowValidator),
   handler: async (ctx, args) => {
     await requireRoles(ctx, ["teacher"]);
-    const students = args.classId
-      ? await ctx.db
-          .query("students")
-          .withIndex("by_class", (q) => q.eq("classId", args.classId!))
-          .take(80)
-      : await ctx.db.query("students").take(80);
+    const term = normalizeDirectorySearch(args.search);
+    const students = await studentsForDirectory(ctx, args.classId, term);
 
     const rows = [];
     for (const student of students) {
       if (student.status !== "enrolled") {
+        continue;
+      }
+      if (!matchesDirectorySearch(student, term)) {
         continue;
       }
       const marks = await ctx.db
@@ -1254,8 +1303,8 @@ async function studentLedger(
     };
   }
 
-  const { feeYearStart, asOfMonth, fromMonth, throughMonth } =
-    feeScheduleWindow(classroom.academicYear, asOf);
+  const schedule = await academicSchedule(ctx, student, asOf);
+  const { feeYearStart, asOfMonth, fromMonth, throughMonth } = schedule;
 
   const invoices = await ctx.db
     .query("fees")
@@ -1278,7 +1327,9 @@ async function studentLedger(
   }
 
   const academic = buildFeeAccount({
-    monthlyRate: breakdown.monthlyFee,
+    monthlyRate: schedule.monthlyRate,
+    ...(schedule.monthCharges ? { monthCharges: schedule.monthCharges } : {}),
+    monthDiscounts: academicMonthDiscounts(payments),
     paid: academicPaid,
     fromMonth,
     throughMonth,

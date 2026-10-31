@@ -35,7 +35,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { feeYearLabel, feeYearStartYear } from "@convex/lib/feeLedger";
+import {
+  allocateCollectionDiscount,
+  feeYearLabel,
+  feeYearStartYear,
+  roundMoney,
+  type DiscountMethod,
+} from "@convex/lib/feeLedger";
 import { FeeOverview } from "./fee-overview";
 
 function money(value: number) {
@@ -76,6 +82,58 @@ const paymentModeLabel: Record<PaymentMode, string> = {
   online: "Online",
 };
 
+const discountMethodLabel: Record<DiscountMethod, string> = {
+  equal: "Equally across months",
+  first: "From the first month",
+  last: "From the last month",
+};
+
+type CollectionDiscount = {
+  amount: number;
+  reason: string;
+  method: DiscountMethod;
+};
+
+function parseCollectionDiscount(args: {
+  amount: number;
+  discount: string;
+  reason: string;
+  method: DiscountMethod;
+  months: ReadonlyArray<{ month: string; balance: number }>;
+}): CollectionDiscount | null {
+  const raw = args.discount.trim();
+  if (raw === "") {
+    return null;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error("Discount must be zero or greater");
+  }
+  const discount = roundMoney(value);
+  if (discount === 0) {
+    return null;
+  }
+  if (discount > roundMoney(args.amount)) {
+    throw new Error(
+      "Discount cannot be larger than the amount being collected",
+    );
+  }
+  const reason = args.reason.trim();
+  if (!reason) {
+    throw new Error("Enter a reason for the discount");
+  }
+  if (reason.length > 200) {
+    throw new Error("Discount reason must be 200 characters or less");
+  }
+  allocateCollectionDiscount({
+    method: args.method,
+    discount,
+    amount: roundMoney(args.amount),
+    months: args.months,
+  });
+  return { amount: discount, reason, method: args.method };
+}
+
 type Coverage = "paid" | "partial" | "due" | "upcoming" | "advance";
 
 const coverageLabel: Record<Coverage, string> = {
@@ -99,6 +157,7 @@ type Account = {
     label: string;
     charge: number;
     applied: number;
+    discount: number;
     balance: number;
     coverage: Coverage;
   }>;
@@ -108,6 +167,7 @@ type Statement = {
   studentId: Id<"students">;
   studentName: string;
   admissionNumber: string;
+  fatherName?: string;
   classLabel: string;
   year: string;
   academicEarlierPayments: number;
@@ -121,6 +181,9 @@ type Statement = {
     amount: number;
     paidOn: string;
     note?: string;
+    discountAmount?: number;
+    discountReason?: string;
+    discountMethod?: DiscountMethod;
   }>;
   transportPayments: Array<{
     id: Id<"feePayments">;
@@ -158,6 +221,7 @@ function FeePanel({
   canCollect,
   collectLabel,
   requireMode = false,
+  allowDiscount = false,
   onCollect,
   onOpenInvoice,
 }: {
@@ -169,20 +233,47 @@ function FeePanel({
   canCollect: boolean;
   collectLabel: string;
   requireMode?: boolean;
-  onCollect: (amount: number, mode?: PaymentMode) => Promise<void>;
+  allowDiscount?: boolean;
+  onCollect: (
+    amount: number,
+    mode?: PaymentMode,
+    discount?: CollectionDiscount,
+  ) => Promise<void>;
   onOpenInvoice?: (paymentId: Id<"feePayments">) => void;
 }) {
   const [amount, setAmount] = useState("");
+  const [discount, setDiscount] = useState("");
+  const [discountReason, setDiscountReason] = useState("");
+  const [discountMethod, setDiscountMethod] = useState<DiscountMethod>("equal");
   const [saving, setSaving] = useState(false);
   const [pendingAmount, setPendingAmount] = useState<number | null>(null);
+  const [pendingDiscount, setPendingDiscount] =
+    useState<CollectionDiscount | null>(null);
   const [mode, setMode] = useState<PaymentMode | null>(null);
+  const discountNumber = Number(discount);
+  const showDiscountReason =
+    allowDiscount === true &&
+    discount.trim() !== "" &&
+    Number.isFinite(discountNumber) &&
+    discountNumber > 0;
+  const showDiscountColumn = account.months.some(
+    (month) => month.discount > 0,
+  );
 
-  async function collect(value: number, chosen?: PaymentMode) {
+  async function collect(
+    value: number,
+    chosen?: PaymentMode,
+    collectionDiscount?: CollectionDiscount | null,
+  ) {
     setSaving(true);
     try {
-      await onCollect(value, chosen);
+      await onCollect(value, chosen, collectionDiscount ?? undefined);
       setAmount("");
+      setDiscount("");
+      setDiscountReason("");
+      setDiscountMethod("equal");
       setPendingAmount(null);
+      setPendingDiscount(null);
       setMode(null);
     } catch {
       // onCollect already reported the error; keep the form for a retry.
@@ -246,6 +337,9 @@ function FeePanel({
                   <th className="py-2 pr-3 font-medium">Month</th>
                   <th className="py-2 pr-3 font-medium">Fee</th>
                   <th className="py-2 pr-3 font-medium">Applied</th>
+                  {showDiscountColumn ? (
+                    <th className="py-2 pr-3 font-medium">Discount</th>
+                  ) : null}
                   <th className="py-2 pr-3 font-medium">Left</th>
                   <th className="py-2 font-medium">Status</th>
                 </tr>
@@ -260,6 +354,11 @@ function FeePanel({
                     <td className="py-2 pr-3 tabular-nums">
                       {money(month.applied)}
                     </td>
+                    {showDiscountColumn ? (
+                      <td className="py-2 pr-3 tabular-nums">
+                        {money(month.discount)}
+                      </td>
+                    ) : null}
                     <td className="py-2 pr-3 tabular-nums">
                       {money(month.balance)}
                     </td>
@@ -272,7 +371,11 @@ function FeePanel({
         )}
         {canCollect ? (
           <form
-            className="flex flex-col gap-3 sm:flex-row sm:items-end"
+            className={
+              allowDiscount
+                ? "flex flex-col gap-3"
+                : "flex flex-col gap-3 sm:flex-row sm:items-end"
+            }
             onSubmit={async (event) => {
               event.preventDefault();
               const parsed = Number(amount);
@@ -280,23 +383,111 @@ function FeePanel({
                 toast.error("Enter an amount greater than 0");
                 return;
               }
+              let collectionDiscount: CollectionDiscount | null = null;
+              if (allowDiscount) {
+                try {
+                  collectionDiscount = parseCollectionDiscount({
+                    amount: parsed,
+                    discount,
+                    reason: discountReason,
+                    method: discountMethod,
+                    months: account.months,
+                  });
+                } catch (error) {
+                  toast.error(
+                    error instanceof Error
+                      ? error.message
+                      : "Discount is not valid",
+                  );
+                  return;
+                }
+              }
               if (requireMode) {
                 setMode(null);
                 setPendingAmount(parsed);
+                setPendingDiscount(collectionDiscount);
                 return;
               }
-              await collect(parsed);
+              await collect(parsed, undefined, collectionDiscount);
             }}
           >
-            <div className="grid flex-1 gap-2">
-              <Label htmlFor={`${title}-amount`}>Amount</Label>
-              <Input
-                id={`${title}-amount`}
-                inputMode="decimal"
-                value={amount}
-                onChange={(event) => setAmount(event.target.value)}
-                placeholder="Any amount"
-              />
+            <div className="grid flex-1 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor={`${title}-amount`}>Amount</Label>
+                <Input
+                  id={`${title}-amount`}
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(event) => setAmount(event.target.value)}
+                  placeholder="Any amount"
+                  disabled={saving}
+                />
+              </div>
+              {allowDiscount ? (
+                <>
+                  <div className="grid gap-2">
+                    <Label htmlFor={`${title}-discount`}>Discount</Label>
+                    <Input
+                      id={`${title}-discount`}
+                      inputMode="decimal"
+                      value={discount}
+                      onChange={(event) => setDiscount(event.target.value)}
+                      placeholder="0.00"
+                      disabled={saving}
+                    />
+                  </div>
+                  {showDiscountReason ? (
+                    <div className="grid gap-2">
+                      <Label htmlFor={`${title}-discount-reason`}>
+                        Reason for discount
+                      </Label>
+                      <Textarea
+                        id={`${title}-discount-reason`}
+                        value={discountReason}
+                        maxLength={200}
+                        onChange={(event) =>
+                          setDiscountReason(event.target.value)
+                        }
+                        placeholder="Why this discount is given"
+                        disabled={saving}
+                      />
+                    </div>
+                  ) : null}
+                  <fieldset className="grid gap-2">
+                    <legend className="text-sm font-medium">
+                      Apply discount
+                    </legend>
+                    <div
+                      role="radiogroup"
+                      aria-label="Apply discount"
+                      className="grid gap-2"
+                    >
+                      {(
+                        [
+                          ["equal", "Equally across months"],
+                          ["first", "From the first month"],
+                          ["last", "From the last month"],
+                        ] as const
+                      ).map(([value, label]) => (
+                        <label
+                          key={value}
+                          className="flex items-center gap-2 text-sm"
+                        >
+                          <input
+                            type="radio"
+                            name={`${title}-discount-method`}
+                            value={value}
+                            checked={discountMethod === value}
+                            disabled={saving}
+                            onChange={() => setDiscountMethod(value)}
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                </>
+              ) : null}
             </div>
             <Button type="submit" disabled={saving}>
               {saving ? "Saving…" : collectLabel}
@@ -309,6 +500,7 @@ function FeePanel({
             onOpenChange={(open) => {
               if (!open && !saving) {
                 setPendingAmount(null);
+                setPendingDiscount(null);
                 setMode(null);
               }
             }}
@@ -319,6 +511,9 @@ function FeePanel({
                 <DialogDescription>
                   How was {money(pendingAmount ?? 0)} paid? Choose one to save
                   the payment.
+                  {pendingDiscount
+                    ? ` A discount of ${money(pendingDiscount.amount)} will reduce academic dues (${discountMethodLabel[pendingDiscount.method]}).`
+                    : ""}
                 </DialogDescription>
               </DialogHeader>
               <div
@@ -348,6 +543,7 @@ function FeePanel({
                   disabled={saving}
                   onClick={() => {
                     setPendingAmount(null);
+                    setPendingDiscount(null);
                     setMode(null);
                   }}
                 >
@@ -358,7 +554,7 @@ function FeePanel({
                   disabled={!mode || saving || pendingAmount === null}
                   onClick={() => {
                     if (mode && pendingAmount !== null) {
-                      void collect(pendingAmount, mode);
+                      void collect(pendingAmount, mode, pendingDiscount);
                     }
                   }}
                 >
@@ -374,6 +570,17 @@ function FeePanel({
             {payments.map((payment) => (
               <p key={payment.id} className="text-muted-foreground">
                 {payment.paidOn}: {money(payment.amount)}
+                {payment.discountAmount
+                  ? ` · Discount ${money(payment.discountAmount)}${
+                      payment.discountMethod
+                        ? ` · ${discountMethodLabel[payment.discountMethod]}`
+                        : ""
+                    }${
+                      payment.discountReason
+                        ? ` (${payment.discountReason})`
+                        : ""
+                    }`
+                  : ""}
                 {payment.note ? ` · ${payment.note}` : ""}
                 {onOpenInvoice ? (
                   <>
@@ -732,9 +939,17 @@ function FeeInvoice({ paymentId }: { paymentId: Id<"feePayments"> }) {
 
       <div className={NAVY_RULE} />
 
-      <section className="grid grid-cols-3 gap-3 text-sm">
+      <section
+        className={`grid gap-3 text-sm ${invoice.discountAmount ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}
+      >
         <InvoiceDetail label="Total due" value={money(invoice.dueBefore)} />
         <InvoiceDetail label="Amount paid" value={money(invoice.amount)} />
+        {invoice.discountAmount ? (
+          <InvoiceDetail
+            label="Discount"
+            value={money(invoice.discountAmount)}
+          />
+        ) : null}
         {invoice.advanceAfter > 0 ? (
           <InvoiceDetail
             label="Advance after payment"
@@ -747,6 +962,14 @@ function FeeInvoice({ paymentId }: { paymentId: Id<"feePayments"> }) {
           />
         )}
       </section>
+      {invoice.discountAmount ? (
+        <p className="text-sm">
+          {invoice.discountMethod
+            ? discountMethodLabel[invoice.discountMethod]
+            : "Discount"}
+          {invoice.discountReason ? ` · ${invoice.discountReason}` : ""}
+        </p>
+      ) : null}
 
       <div className={NAVY_RULE} />
 
@@ -756,6 +979,11 @@ function FeeInvoice({ paymentId }: { paymentId: Id<"feePayments"> }) {
             <tr className="border-b border-neutral-400 text-left">
               <th className="py-1.5 pr-3 font-semibold">Description</th>
               <th className="py-1.5 pr-3 text-right font-semibold">Due</th>
+              {invoice.discountAmount ? (
+                <th className="py-1.5 pr-3 text-right font-semibold">
+                  Discount
+                </th>
+              ) : null}
               <th className="py-1.5 text-right font-semibold">Paid</th>
             </tr>
           </thead>
@@ -772,6 +1000,11 @@ function FeeInvoice({ paymentId }: { paymentId: Id<"feePayments"> }) {
                 <td className="py-1.5 pr-3 text-right tabular-nums">
                   {money(line.dueBefore)}
                 </td>
+                {invoice.discountAmount ? (
+                  <td className="py-1.5 pr-3 text-right tabular-nums">
+                    {money(line.discount ?? 0)}
+                  </td>
+                ) : null}
                 <td className="py-1.5 text-right tabular-nums">
                   {money(line.paid)}
                 </td>
@@ -783,6 +1016,9 @@ function FeeInvoice({ paymentId }: { paymentId: Id<"feePayments"> }) {
                   Advance beyond {invoice.session}
                 </td>
                 <td className="py-1.5 pr-3 text-right">—</td>
+                {invoice.discountAmount ? (
+                  <td className="py-1.5 pr-3 text-right">—</td>
+                ) : null}
                 <td className="py-1.5 text-right tabular-nums">
                   {money(invoice.unallocated)}
                 </td>
@@ -790,7 +1026,10 @@ function FeeInvoice({ paymentId }: { paymentId: Id<"feePayments"> }) {
             ) : null}
             {invoice.lines.length === 0 && invoice.unallocated <= 0 ? (
               <tr>
-                <td colSpan={3} className="py-1.5 text-neutral-600">
+                <td
+                  colSpan={invoice.discountAmount ? 4 : 3}
+                  className="py-1.5 text-neutral-600"
+                >
                   {invoice.kind === "transport"
                     ? "No transport months were charged for this payment."
                     : "No tuition months were charged for this payment."}
@@ -924,6 +1163,11 @@ function StatementView({
             {statement.admissionNumber}
           </span>
         </h2>
+        {statement.fatherName ? (
+          <p className="text-sm text-muted-foreground">
+            {statement.fatherName}
+          </p>
+        ) : null}
         <p className="text-sm text-muted-foreground">
           {statement.classLabel} · {statement.year}
         </p>
@@ -938,8 +1182,9 @@ function StatementView({
           canCollect={canCollect}
           collectLabel="Collect academic fee"
           requireMode
+          allowDiscount
           onOpenInvoice={setInvoicePaymentId}
-          onCollect={async (amount, mode) => {
+          onCollect={async (amount, mode, discount) => {
             if (!mode) {
               toast.error("Choose a payment mode");
               throw new Error("Payment mode is required");
@@ -951,6 +1196,13 @@ function StatementView({
                 amount,
                 paidOn: asOf,
                 mode,
+                ...(discount && discount.amount > 0
+                  ? {
+                      discountAmount: discount.amount,
+                      discountReason: discount.reason,
+                      discountMethod: discount.method,
+                    }
+                  : {}),
               });
               toast.success("Academic fee recorded");
               setInvoicePaymentId(paymentId);

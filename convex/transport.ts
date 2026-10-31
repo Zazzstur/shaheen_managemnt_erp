@@ -100,9 +100,16 @@ export const listRoutes = query({
         .query("studentTransport")
         .withIndex("by_route", (q) => q.eq("routeId", route._id))
         .take(80);
+      let assignedCount = 0;
+      for (const assignment of assigned) {
+        const student = await ctx.db.get("students", assignment.studentId);
+        if (student?.status === "enrolled") {
+          assignedCount += 1;
+        }
+      }
       rows.push({
         ...route,
-        assignedCount: assigned.length,
+        assignedCount,
       });
     }
     return rows;
@@ -125,7 +132,7 @@ export const listAssignmentsForRoute = query({
     const rows = [];
     for (const assignment of assignments) {
       const student = await ctx.db.get("students", assignment.studentId);
-      if (!student) {
+      if (!student || student.status !== "enrolled") {
         continue;
       }
       rows.push({

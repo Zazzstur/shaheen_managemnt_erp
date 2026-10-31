@@ -4,6 +4,7 @@ import { v } from "convex/values";
 import {
   attendanceStatusValidator,
   dayOfWeekValidator,
+  collectionDiscountMethodValidator,
   feeStatusValidator,
   genderValidator,
   schoolAffiliationValidator,
@@ -162,6 +163,17 @@ export default defineSchema({
     paidOn: v.string(),
     note: v.optional(v.string()),
     mode: v.optional(v.union(v.literal("cash"), v.literal("online"))),
+    discountAmount: v.optional(v.number()),
+    discountReason: v.optional(v.string()),
+    discountMethod: v.optional(collectionDiscountMethodValidator),
+    discountLines: v.optional(
+      v.array(
+        v.object({
+          month: v.string(),
+          amount: v.number(),
+        }),
+      ),
+    ),
   }).index("by_student", ["studentId"]),
 
   invoiceNotice: defineTable({
@@ -230,4 +242,12 @@ export default defineSchema({
   })
     .index("by_date", ["date"])
     .index("by_date_and_slot", ["date", "timetableId"]),
+
+  classChanges: defineTable({
+    studentId: v.id("students"),
+    fromClassId: v.id("classes"),
+    toClassId: v.id("classes"),
+    effectiveMonth: v.string(),
+    changedBy: v.id("users"),
+  }).index("by_student", ["studentId"]),
 });

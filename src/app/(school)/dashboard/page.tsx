@@ -25,6 +25,20 @@ const LINKS = [
     roles: ["super_admin", "teacher"],
   },
   {
+    href: "/students/class-change",
+    title: "Class change",
+    description:
+      "Move a student to a new class. Fees follow that class from the month you choose.",
+    roles: ["super_admin"],
+  },
+  {
+    href: "/students/transfer-certificate",
+    title: "Transfer certificate",
+    description:
+      "Withdraw a student from school. Past fees and marks stay on record.",
+    roles: ["super_admin"],
+  },
+  {
     href: "/classes",
     title: "Classes & fees",
     description: "Create classes and set tuition structures.",

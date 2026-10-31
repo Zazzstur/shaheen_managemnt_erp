@@ -11,7 +11,11 @@ import {
   requireSchoolAdmin,
   requireSuperAdmin,
 } from "./lib/auth";
-import { feeListItemValidator, feeStatusValidator } from "./lib/validators";
+import {
+  collectionDiscountMethodValidator,
+  feeListItemValidator,
+  feeStatusValidator,
+} from "./lib/validators";
 import { studentName } from "./lib/studentName";
 import {
   feeQuoteValidator,
@@ -19,12 +23,13 @@ import {
   quoteStudentFee,
   uniqueInvoiceNumber,
 } from "./lib/feeQuote";
+import { academicSchedule } from "./lib/classHistory";
 import {
-  academicFeeBreakdown,
+  academicMonthDiscounts,
+  allocateCollectionDiscount,
   allocatePayment,
   buildFeeAccount,
   dueInRange,
-  feeScheduleWindow,
   feeYearStartYear,
   monthKeyFromTimestamp,
   roundMoney,
@@ -251,6 +256,7 @@ const feeAccountValidator = v.object({
       label: v.string(),
       charge: v.number(),
       applied: v.number(),
+      discount: v.number(),
       balance: v.number(),
       coverage: coverageValidator,
     }),
@@ -261,6 +267,8 @@ const feeStatementValidator = v.object({
   studentId: v.id("students"),
   studentName: v.string(),
   admissionNumber: v.string(),
+  // Admission form stores the father's name in guardianName.
+  fatherName: v.optional(v.string()),
   classLabel: v.string(),
   year: v.string(),
   academicEarlierPayments: v.number(),
@@ -275,6 +283,9 @@ const feeStatementValidator = v.object({
       amount: v.number(),
       paidOn: v.string(),
       note: v.optional(v.string()),
+      discountAmount: v.optional(v.number()),
+      discountReason: v.optional(v.string()),
+      discountMethod: v.optional(collectionDiscountMethodValidator),
     }),
   ),
   transportPayments: v.array(
@@ -294,25 +305,8 @@ const searchHitValidator = v.object({
   classLabel: v.string(),
 });
 
-function academicMonthlyRate(
-  classroom: Doc<"classes">,
-  student: Doc<"students">,
-) {
-  return academicFeeBreakdown({
-    baseTuitionFee: classroom.baseTuitionFee,
-    extraFees: classroom.extraFees,
-    tuitionCycle: classroom.tuitionCycle,
-    discountType: student.discountType,
-    discountValue: student.discountValue,
-  }).monthlyFee;
-}
-
 function laterMonth(left: string, right: string) {
   return left > right ? left : right;
-}
-
-function feeWindow(classroom: Doc<"classes">, asOf: string) {
-  return feeScheduleWindow(classroom.academicYear, asOf);
 }
 
 async function invoicePaymentsTotal(ctx: QueryCtx, studentId: Id<"students">) {
@@ -330,6 +324,79 @@ function trimmed(value: string | undefined) {
   return text ? text : undefined;
 }
 
+async function collectionDiscountForSettlement(
+  ctx: QueryCtx,
+  student: Doc<"students">,
+  args: {
+    kind: "academic" | "transport";
+    amount: number;
+    paidOn: string;
+    discountAmount?: number;
+    discountReason?: string;
+    discountMethod?: "equal" | "first" | "last";
+  },
+) {
+  const raw = args.discountAmount ?? 0;
+  if (!Number.isFinite(raw) || raw < 0) {
+    throw new Error("Discount must be zero or greater");
+  }
+  const discount = roundMoney(raw);
+  if (discount === 0) {
+    return null;
+  }
+  if (args.kind !== "academic") {
+    throw new Error("Discounts apply to academic fee collection only");
+  }
+  if (discount > 10_000_000) {
+    throw new Error("Discount is too large");
+  }
+  if (discount > roundMoney(args.amount)) {
+    throw new Error(
+      "Discount cannot be larger than the amount being collected",
+    );
+  }
+  const method = args.discountMethod ?? "equal";
+  const reason = args.discountReason?.trim() ?? "";
+  if (!reason) {
+    throw new Error("Enter a reason for the discount");
+  }
+  if (reason.length > 200) {
+    throw new Error("Discount reason must be 200 characters or less");
+  }
+  const schedule = await academicSchedule(ctx, student, args.paidOn);
+  const payments = await ctx.db
+    .query("feePayments")
+    .withIndex("by_student", (q) => q.eq("studentId", student._id))
+    .take(200);
+  let paid = await invoicePaymentsTotal(ctx, student._id);
+  for (const payment of payments) {
+    if (payment.kind === "academic") {
+      paid = roundMoney(paid + payment.amount);
+    }
+  }
+  const account = buildFeeAccount({
+    monthlyRate: schedule.monthlyRate,
+    ...(schedule.monthCharges ? { monthCharges: schedule.monthCharges } : {}),
+    monthDiscounts: academicMonthDiscounts(payments),
+    paid,
+    fromMonth: schedule.fromMonth,
+    throughMonth: schedule.throughMonth,
+    asOfMonth: schedule.asOfMonth,
+    feeYearStart: schedule.feeYearStart,
+  });
+  return {
+    amount: discount,
+    reason,
+    method,
+    lines: allocateCollectionDiscount({
+      method,
+      discount,
+      amount: roundMoney(args.amount),
+      months: account.months,
+    }),
+  };
+}
+
 async function loadFeeStatement(
   ctx: QueryCtx,
   studentId: Id<"students">,
@@ -339,13 +406,10 @@ async function loadFeeStatement(
   if (!student || student.status !== "enrolled") {
     throw new Error("Student not found");
   }
-  const classroom = await ctx.db.get("classes", student.classId);
-  if (!classroom) {
-    throw new Error("Class not found for this student");
-  }
-
+  const schedule = await academicSchedule(ctx, student, asOf);
+  const classroom = schedule.classroom;
   const { feeYearStart, feeYearLabel, asOfMonth, fromMonth, throughMonth } =
-    feeWindow(classroom, asOf);
+    schedule;
 
   const academicEarlierPayments = await invoicePaymentsTotal(
     ctx,
@@ -373,14 +437,29 @@ async function loadFeeStatement(
       transportPayments.push(row);
     } else {
       academicPaid = roundMoney(academicPaid + payment.amount);
-      academicPayments.push(row);
+      academicPayments.push({
+        ...row,
+        ...(payment.discountAmount
+          ? {
+              discountAmount: payment.discountAmount,
+              ...(payment.discountReason
+                ? { discountReason: payment.discountReason }
+                : {}),
+              ...(payment.discountMethod
+                ? { discountMethod: payment.discountMethod }
+                : {}),
+            }
+          : {}),
+      });
     }
   }
   academicPayments.sort((a, b) => b.paidOn.localeCompare(a.paidOn));
   transportPayments.sort((a, b) => b.paidOn.localeCompare(a.paidOn));
 
   const academic = buildFeeAccount({
-    monthlyRate: academicMonthlyRate(classroom, student),
+    monthlyRate: schedule.monthlyRate,
+    ...(schedule.monthCharges ? { monthCharges: schedule.monthCharges } : {}),
+    monthDiscounts: academicMonthDiscounts(payments),
     paid: academicPaid,
     fromMonth,
     throughMonth,
@@ -411,10 +490,13 @@ async function loadFeeStatement(
     feeYearStart,
   });
 
+  const fatherName = trimmed(student.guardianName);
+
   return {
     studentId: student._id,
     studentName: studentName(student),
     admissionNumber: student.admissionNumber,
+    ...(fatherName ? { fatherName } : {}),
     classLabel: `${classroom.name} ${classroom.section}`.trim(),
     year: feeYearLabel,
     academicEarlierPayments,
@@ -428,38 +510,76 @@ async function loadFeeStatement(
   };
 }
 
+const MAX_FEE_SEARCH_LENGTH = 100;
+
+function normalizeFeeSearchTerm(value: string | undefined) {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .slice(0, MAX_FEE_SEARCH_LENGTH);
+}
+
+function matchesFeeSearch(student: Doc<"students">, term: string) {
+  if (student.status !== "enrolled") {
+    return false;
+  }
+  if (!term) {
+    return true;
+  }
+  const name = studentName(student).toLowerCase().replace(/\s+/g, " ").trim();
+  const admission = student.admissionNumber.toLowerCase().replace(/\s+/g, "");
+  const admissionTerm = term.replace(/ /g, "");
+  return (
+    name.includes(term) ||
+    (admissionTerm.length > 0 && admission.includes(admissionTerm))
+  );
+}
+
+async function enrolledStudentsForFeeSearch(
+  ctx: QueryCtx,
+  classId: Id<"classes"> | undefined,
+) {
+  const students = classId
+    ? await ctx.db
+        .query("students")
+        .withIndex("by_class", (q) => q.eq("classId", classId))
+        .collect()
+    : await ctx.db.query("students").collect();
+  return students.filter((student) => student.status === "enrolled");
+}
+
 export const searchStudents = query({
   args: { term: v.string() },
   returns: v.array(searchHitValidator),
   handler: async (ctx, args) => {
     await requireSchoolAdmin(ctx);
-    const term = args.term.trim().toLowerCase();
+    const term = normalizeFeeSearchTerm(args.term);
     if (term.length < 1) {
       return [];
     }
-    const students = await ctx.db.query("students").take(200);
+    const students = await enrolledStudentsForFeeSearch(ctx, undefined);
+    const classLabels = new Map<Id<"classes">, string>();
     const hits = [];
     for (const student of students) {
-      if (student.status !== "enrolled") {
+      if (!matchesFeeSearch(student, term)) {
         continue;
+      }
+      let classLabel = classLabels.get(student.classId);
+      if (classLabel === undefined) {
+        const classroom = await ctx.db.get("classes", student.classId);
+        classLabel = classroom
+          ? `${classroom.name} ${classroom.section}`.trim()
+          : "Unassigned";
+        classLabels.set(student.classId, classLabel);
       }
       const name = studentName(student);
-      const haystack = `${name} ${student.admissionNumber}`.toLowerCase();
-      if (!haystack.includes(term)) {
-        continue;
-      }
-      const classroom = await ctx.db.get("classes", student.classId);
       hits.push({
         studentId: student._id,
         studentName: name,
         admissionNumber: student.admissionNumber,
-        classLabel: classroom
-          ? `${classroom.name} ${classroom.section}`.trim()
-          : "Unassigned",
+        classLabel,
       });
-      if (hits.length >= 12) {
-        break;
-      }
     }
     hits.sort((a, b) => a.studentName.localeCompare(b.studentName));
     return hits;
@@ -487,19 +607,16 @@ export const filterStudents = query({
     if (!isIsoDate(args.asOf)) {
       throw new Error("Date must be YYYY-MM-DD");
     }
-    const term = args.term.trim().toLowerCase();
+    const term = normalizeFeeSearchTerm(args.term);
     if (!args.classId && !term) {
       return [];
     }
-    const students = await enrolledStudents(ctx, args.classId);
+    const students = await enrolledStudentsForFeeSearch(ctx, args.classId);
     const classLabels = new Map<Id<"classes">, string | null>();
     const hits = [];
     for (const student of students) {
       const name = studentName(student);
-      if (
-        term &&
-        !`${name} ${student.admissionNumber}`.toLowerCase().includes(term)
-      ) {
+      if (term && !matchesFeeSearch(student, term)) {
         continue;
       }
       let classLabel = classLabels.get(student.classId);
@@ -602,6 +719,9 @@ export const recordSettlement = mutation({
     paidOn: v.string(),
     note: v.optional(v.string()),
     mode: v.optional(paymentModeValidator),
+    discountAmount: v.optional(v.number()),
+    discountReason: v.optional(v.string()),
+    discountMethod: v.optional(collectionDiscountMethodValidator),
   },
   returns: v.id("feePayments"),
   handler: async (ctx, args) => {
@@ -631,6 +751,7 @@ export const recordSettlement = mutation({
         throw new Error("This student is not assigned to a transport route");
       }
     }
+    const discount = await collectionDiscountForSettlement(ctx, student, args);
     const note = args.note?.trim();
     return await ctx.db.insert("feePayments", {
       studentId: args.studentId,
@@ -639,6 +760,14 @@ export const recordSettlement = mutation({
       paidOn: args.paidOn,
       note: note ? note.slice(0, 200) : undefined,
       mode: args.mode,
+      ...(discount
+        ? {
+            discountAmount: discount.amount,
+            discountReason: discount.reason,
+            discountMethod: discount.method,
+            discountLines: discount.lines,
+          }
+        : {}),
     });
   },
 });
@@ -667,9 +796,13 @@ const paymentInvoiceValidator = v.object({
       charge: v.number(),
       dueBefore: v.number(),
       paid: v.number(),
+      discount: v.number(),
     }),
   ),
   unallocated: v.number(),
+  discountAmount: v.optional(v.number()),
+  discountReason: v.optional(v.string()),
+  discountMethod: v.optional(collectionDiscountMethodValidator),
 });
 
 export const paymentInvoice = query({
@@ -686,16 +819,16 @@ export const paymentInvoice = query({
       throw new Error("Payment not found");
     }
     const student = await assertStudentAccess(ctx, payment.studentId, user);
-    const classroom = await ctx.db.get("classes", student.classId);
-    if (!classroom) {
-      throw new Error("Class not found for this student");
-    }
+    const schedule = await academicSchedule(ctx, student, payment.paidOn);
+    const classroom = schedule.classroom;
 
     const { feeYearStart, feeYearLabel, asOfMonth, fromMonth, throughMonth } =
-      feeWindow(classroom, payment.paidOn);
-    let monthlyRate = academicMonthlyRate(classroom, student);
+      schedule;
+    let monthlyRate = schedule.monthlyRate;
+    let monthCharges = schedule.monthCharges;
     let chargeFrom = fromMonth;
     if (payment.kind === "transport") {
+      monthCharges = undefined;
       const assignment = await ctx.db
         .query("studentTransport")
         .withIndex("by_student", (q) => q.eq("studentId", student._id))
@@ -728,24 +861,40 @@ export const paymentInvoice = query({
       }
     }
 
+    const earlierPayments = payments.filter(
+      (other) => other._creationTime < payment._creationTime,
+    );
+    const discountsBefore =
+      payment.kind === "academic"
+        ? academicMonthDiscounts(earlierPayments)
+        : undefined;
+    const discountsAfter =
+      payment.kind === "academic"
+        ? academicMonthDiscounts([...earlierPayments, payment])
+        : undefined;
     const accountArgs = {
       monthlyRate,
+      ...(monthCharges ? { monthCharges } : {}),
       fromMonth: chargeFrom,
       throughMonth,
       asOfMonth,
     };
     const before = buildFeeAccount({
       ...accountArgs,
+      ...(discountsBefore ? { monthDiscounts: discountsBefore } : {}),
       paid: paidBefore,
       feeYearStart,
     });
     const after = buildFeeAccount({
       ...accountArgs,
+      ...(discountsAfter ? { monthDiscounts: discountsAfter } : {}),
       paid: roundMoney(paidBefore + payment.amount),
       feeYearStart,
     });
     const allocation = allocatePayment({
       monthlyRate,
+      ...(monthCharges ? { monthCharges } : {}),
+      ...(discountsAfter ? { monthDiscounts: discountsAfter } : {}),
       paidBefore,
       amount: payment.amount,
       fromMonth: chargeFrom,
@@ -756,6 +905,33 @@ export const paymentInvoice = query({
     const fatherPhone = trimmed(student.guardianPhone);
     const motherName = trimmed(student.motherName);
     const motherPhone = trimmed(student.motherPhone);
+
+    const discountByMonth = new Map(
+      (payment.discountLines ?? []).map((line) => [line.month, line.amount]),
+    );
+    const lines = allocation.lines.map((line) => {
+      const prior = before.months.find((month) => month.month === line.month);
+      return {
+        ...line,
+        dueBefore: prior?.balance ?? line.dueBefore,
+        discount: discountByMonth.get(line.month) ?? 0,
+      };
+    });
+    for (const extra of payment.discountLines ?? []) {
+      if (extra.amount <= 0 || lines.some((line) => line.month === extra.month)) {
+        continue;
+      }
+      const prior = before.months.find((month) => month.month === extra.month);
+      lines.push({
+        month: extra.month,
+        label: prior?.label ?? extra.month,
+        charge: prior?.charge ?? 0,
+        dueBefore: prior?.balance ?? extra.amount,
+        paid: 0,
+        discount: extra.amount,
+      });
+    }
+    lines.sort((left, right) => left.month.localeCompare(right.month));
 
     return {
       paymentId: payment._id,
@@ -774,8 +950,19 @@ export const paymentInvoice = query({
       dueBefore: before.due,
       dueAfter: after.due,
       advanceAfter: after.advance,
-      lines: allocation.lines,
+      lines,
       unallocated: allocation.unallocated,
+      ...(payment.discountAmount
+        ? {
+            discountAmount: payment.discountAmount,
+            ...(payment.discountReason
+              ? { discountReason: payment.discountReason }
+              : {}),
+            ...(payment.discountMethod
+              ? { discountMethod: payment.discountMethod }
+              : {}),
+          }
+        : {}),
     };
   },
 });

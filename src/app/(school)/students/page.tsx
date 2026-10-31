@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useConvex, useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
@@ -11,6 +11,7 @@ import { isSchoolAdmin } from "@/lib/access";
 import { downloadCsv } from "@/lib/downloadCsv";
 import { parseStudentCsv, studentCsvTemplate } from "@/lib/studentCsv";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Card,
@@ -63,6 +64,14 @@ export default function StudentsDirectoryPage() {
   });
   const [classId, setClassId] = useState<Id<"classes"> | "">("");
   const [feeFilter, setFeeFilter] = useState<FeeFilter>("all");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setSearch(searchInput.trim().replace(/\s+/g, " "));
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
   const [expandedId, setExpandedId] = useState<Id<"students"> | null>(null);
   const [selectedStudentId, setSelectedStudentId] =
     useState<Id<"students"> | null>(null);
@@ -81,17 +90,23 @@ export default function StudentsDirectoryPage() {
   const isTeacher = me?.role === "teacher" && me.staffRole !== "data_entry";
   const rows = useQuery(
     api.students.directory,
-    canEnroll && classId
+    canEnroll && (classId || search)
       ? {
-          classId,
+          ...(classId ? { classId } : {}),
           feeFilter,
           asOf,
+          ...(search ? { search } : {}),
         }
       : "skip",
   );
   const teacherRows = useQuery(
     api.students.teacherDirectory,
-    isTeacher && classId ? { classId } : "skip",
+    isTeacher && (classId || search)
+      ? {
+          ...(classId ? { classId } : {}),
+          ...(search ? { search } : {}),
+        }
+      : "skip",
   );
 
   if (me === undefined) {
@@ -357,7 +372,23 @@ export default function StudentsDirectoryPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-2">
+          <div
+            className={
+              isTeacher
+                ? "grid gap-3 md:grid-cols-2"
+                : "grid gap-3 md:grid-cols-3"
+            }
+          >
+            <div className="space-y-2">
+              <Label htmlFor="student-directory-search">Search</Label>
+              <Input
+                id="student-directory-search"
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder="Name or admission number"
+                autoComplete="off"
+              />
+            </div>
             <div className="space-y-2">
               <Label>Class</Label>
               <Select
@@ -440,7 +471,7 @@ export default function StudentsDirectoryPage() {
           </div>
 
           {isTeacher ? (
-            !classId ? (
+            !classId && !search ? (
               <p className="text-sm text-muted-foreground">
                 Select a class to see students.
               </p>
@@ -448,7 +479,9 @@ export default function StudentsDirectoryPage() {
               <p className="text-sm text-muted-foreground">Loading students…</p>
             ) : teacherRows.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No students match this class.
+                {search
+                  ? "No students match this search."
+                  : "No students match this class."}
               </p>
             ) : (
               <Table>
@@ -483,7 +516,7 @@ export default function StudentsDirectoryPage() {
                 </TableBody>
               </Table>
             )
-          ) : !classId ? (
+          ) : !classId && !search ? (
             <p className="text-sm text-muted-foreground">
               Select a class to see students.
             </p>
@@ -491,7 +524,9 @@ export default function StudentsDirectoryPage() {
             <p className="text-sm text-muted-foreground">Loading students…</p>
           ) : rows.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No students match these filters.
+              {search
+                ? "No students match this search."
+                : "No students match these filters."}
             </p>
           ) : (
             <Table>

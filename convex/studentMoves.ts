@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { requireSchoolAdmin } from "./lib/auth";
+import { requireSchoolAdmin, requireSchoolViewer } from "./lib/auth";
 import { parseFeeMonth } from "./lib/feeLedger";
 import { studentName } from "./lib/studentName";
 
@@ -54,7 +54,7 @@ export const searchEnrolled = query({
     truncated: v.boolean(),
   }),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     const term = normalizeSearchTerm(args.term);
     if (term.length < 1) {
       return { students: [], truncated: false };
@@ -100,7 +100,7 @@ export const listClasses = query({
   args: {},
   returns: v.array(classOptionValidator),
   handler: async (ctx) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     const classes = await ctx.db.query("classes").collect();
     classes.sort(
       (left, right) =>

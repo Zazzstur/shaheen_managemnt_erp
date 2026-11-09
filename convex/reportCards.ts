@@ -1,7 +1,12 @@
 import { ConvexError, v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
-import { isIsoDate, requireRoles, requireSchoolAdmin } from "./lib/auth";
+import {
+  isIsoDate,
+  rejectObserver,
+  requireRoles,
+  requireSchoolViewer,
+} from "./lib/auth";
 import { studentName } from "./lib/studentName";
 
 async function assertTeacherAssigned(
@@ -148,7 +153,8 @@ export const saveLine = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["teacher"]);
+    const user = await requireRoles(ctx, ["teacher"]);
+    rejectObserver(user);
     const title = args.title.trim();
     if (!title) {
       throw new Error("Report title is required");
@@ -245,7 +251,8 @@ export const saveSubjectMarks = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["teacher"]);
+    const user = await requireRoles(ctx, ["teacher"]);
+    rejectObserver(user);
     const title = args.title.trim();
     if (!title) {
       throw new Error("Report title is required");
@@ -637,6 +644,7 @@ export const saveCategoryMarks = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const user = await requireRoles(ctx, ["teacher"]);
+    rejectObserver(user);
     await assertTeacherAssigned(ctx, user, args.classId, args.subjectId);
     if (!isIsoDate(args.date)) {
       throw new ConvexError("Report date must be YYYY-MM-DD");
@@ -779,7 +787,7 @@ export const printableReport = query({
     ),
   }),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     const classroom = await ctx.db.get("classes", args.classId);
     if (!classroom) {
       throw new Error("Class not found");

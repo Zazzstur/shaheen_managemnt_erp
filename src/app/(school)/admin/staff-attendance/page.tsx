@@ -5,8 +5,15 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { toast } from "sonner";
-import { isSchoolAdmin } from "@/lib/access";
+import { canViewSchoolAdmin, isSchoolAdmin } from "@/lib/access";
 import { mutationResult } from "@/lib/result";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -56,6 +63,148 @@ function todayIso() {
   return `${now.getFullYear()}-${month}-${day}`;
 }
 
+function formatAbsentDay(iso: string) {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function AttendanceLog({
+  open,
+  month,
+  onMonthChange,
+  onOpenChange,
+}: {
+  open: boolean;
+  month: string;
+  onMonthChange: (month: string) => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const rows = useQuery(
+    api.staffAttendance.forMonth,
+    open ? { month } : "skip",
+  );
+  const [search, setSearch] = useState("");
+  const marked = rows?.some(
+    (row) => row.present + row.absent + row.late > 0,
+  );
+  const visible = useMemo(() => {
+    if (!rows) {
+      return [];
+    }
+    const query = search.trim().toLowerCase();
+    if (!query) {
+      return rows;
+    }
+    return rows.filter((row) =>
+      [row.name, row.email, row.roleLabel]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(query)),
+    );
+  }, [rows, search]);
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) {
+          setSearch("");
+        }
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent className="inset-0 top-0 left-0 flex h-dvh w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-4 overflow-hidden rounded-none sm:max-w-none">
+        <DialogHeader>
+          <DialogTitle>Attendance log</DialogTitle>
+          <DialogDescription>
+            Saved attendance for the month. Absent days are the dates marked
+            absent.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="space-y-2">
+            <Label htmlFor="attendance-log-month">Month</Label>
+            <Input
+              id="attendance-log-month"
+              type="month"
+              className="w-48"
+              value={month}
+              onChange={(event) => {
+                if (event.target.value) {
+                  onMonthChange(event.target.value);
+                }
+              }}
+            />
+          </div>
+          <div className="w-full max-w-sm space-y-2">
+            <Label htmlFor="attendance-log-search">Search staff</Label>
+            <Input
+              id="attendance-log-search"
+              value={search}
+              placeholder="Name, email, or role"
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+        {rows === undefined ? (
+          <p className="text-sm text-muted-foreground">Loading attendance log…</p>
+        ) : rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No staff found.</p>
+        ) : visible.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No matching staff.</p>
+        ) : (
+          <>
+          {!marked ? (
+            <p className="text-sm text-muted-foreground">
+              No attendance has been saved for this month.
+            </p>
+          ) : null}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Present</TableHead>
+                <TableHead>Late</TableHead>
+                <TableHead>Absent</TableHead>
+                <TableHead>Absent days</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visible.map((row) => (
+                <TableRow key={row.teacherId}>
+                  <TableCell>
+                    <div className="font-medium">{row.name}</div>
+                    {row.email ? (
+                      <div className="text-xs text-muted-foreground">
+                        {row.email}
+                      </div>
+                    ) : null}
+                  </TableCell>
+                  <TableCell>{row.roleLabel}</TableCell>
+                  <TableCell>{row.present}</TableCell>
+                  <TableCell>{row.late}</TableCell>
+                  <TableCell>{row.absent}</TableCell>
+                  <TableCell className="whitespace-normal">
+                    {row.absentDates.length > 0
+                      ? row.absentDates.map(formatAbsentDay).join(", ")
+                      : "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          </>
+        )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 const STATUS_LABEL = {
   present: "Present",
   absent: "Absent",
@@ -65,8 +214,10 @@ const STATUS_LABEL = {
 function StaffRoster({
   date,
   rows,
+  readOnly = false,
 }: {
   date: string;
+  readOnly?: boolean;
   rows: {
     teacherId: Id<"users">;
     name: string;
@@ -131,9 +282,15 @@ function StaffRoster({
               onChange={(event) => setSearch(event.target.value)}
             />
           </div>
+          {readOnly ? (
+            <p className="text-sm text-muted-foreground">
+              Read-only. Observers cannot mark attendance.
+            </p>
+          ) : (
           <Button type="button" disabled={saving || rows.length === 0} onClick={() => void onSave()}>
             {saving ? "Saving…" : "Save attendance"}
           </Button>
+          )}
         </div>
         {rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No staff found.</p>
@@ -168,6 +325,7 @@ function StaffRoster({
                     <TableCell>
                       <Select
                         value={status}
+                        disabled={readOnly}
                         items={STATUS_LABEL}
                         onValueChange={(next) => {
                           if (
@@ -212,7 +370,10 @@ function StaffRoster({
 export default function StaffAttendancePage() {
   const me = useQuery(api.users.me);
   const [date, setDate] = useState(todayIso);
-  const allowed = me ? isSchoolAdmin(me) : false;
+  const [logOpen, setLogOpen] = useState(false);
+  const [logMonth, setLogMonth] = useState(() => todayIso().slice(0, 7));
+  const allowed = me ? canViewSchoolAdmin(me) : false;
+  const canEdit = me ? isSchoolAdmin(me) : false;
   const rows = useQuery(
     api.staffAttendance.forDate,
     allowed ? { date } : "skip",
@@ -230,18 +391,32 @@ export default function StaffAttendancePage() {
             list for this date.
           </p>
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="staff-attendance-date">Date</Label>
-          <Input
-            id="staff-attendance-date"
-            type="date"
-            value={date}
-            onChange={(event) => {
-              if (event.target.value) {
-                setDate(event.target.value);
-              }
-            }}
-          />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="space-y-2">
+            <Label htmlFor="staff-attendance-date">Date</Label>
+            <Input
+              id="staff-attendance-date"
+              type="date"
+              value={date}
+              onChange={(event) => {
+                if (event.target.value) {
+                  setDate(event.target.value);
+                }
+              }}
+            />
+          </div>
+          {allowed ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setLogMonth(date.slice(0, 7));
+                setLogOpen(true);
+              }}
+            >
+              Attendance log
+            </Button>
+          ) : null}
         </div>
       </div>
       {me === undefined || (allowed && rows === undefined) ? (
@@ -255,7 +430,15 @@ export default function StaffAttendancePage() {
           Only super admins and data entry can mark staff attendance.
         </p>
       ) : rows ? (
-        <StaffRoster key={date} date={date} rows={rows} />
+        <StaffRoster key={date} date={date} rows={rows} readOnly={!canEdit} />
+      ) : null}
+      {allowed ? (
+        <AttendanceLog
+          open={logOpen}
+          month={logMonth}
+          onMonthChange={setLogMonth}
+          onOpenChange={setLogOpen}
+        />
       ) : null}
     </div>
   );

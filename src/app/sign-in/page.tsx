@@ -56,16 +56,33 @@ export default function SignInPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
-      <Card className="w-full max-w-md">
+    <div className="grid min-h-screen bg-background md:grid-cols-2">
+      <div className="hidden flex-col justify-between bg-sidebar p-10 text-sidebar-foreground md:flex">
+        <div>
+          <img
+            src="/shaheen-academy-logo.svg"
+            alt=""
+            className="h-20 w-auto"
+          />
+          <h1 className="mt-8 text-3xl font-semibold tracking-tight">
+            Shaheen Academy
+          </h1>
+          <p className="mt-2 text-sidebar-primary">Champawat</p>
+        </div>
+        <p className="max-w-sm text-sm text-sidebar-foreground/75">
+          Admissions, attendance, timetable, and fees for the school office.
+        </p>
+      </div>
+      <div className="flex items-center justify-center p-4">
+      <Card className="w-full max-w-md shadow-sm">
         <CardHeader className="justify-items-center text-center">
           <img
             src="/shaheen-academy-logo.svg"
             alt=""
-            className="h-16 w-auto"
+            className="h-16 w-auto md:hidden"
           />
-          <CardTitle>SACH</CardTitle>
-          <CardDescription>Sign in with your school account.</CardDescription>
+          <CardTitle>Sign in</CardTitle>
+          <CardDescription>Use your Shaheen Academy account.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -89,6 +106,7 @@ export default function SignInPage() {
           </Button>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

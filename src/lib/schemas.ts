@@ -139,8 +139,15 @@ export const signInSchema = z.object({
 
 export const teacherAccountSchema = z.object({
   name: z.string().trim().min(1, "Name is required"),
-  email: z.string().trim().email("Enter a valid email"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  email: z.string().trim(),
+  phone: z
+    .string()
+    .trim()
+    .transform((value) => value.replace(/\D/g, ""))
+    .pipe(
+      z.string().regex(/^[6-9]\d{9}$/, "Enter a 10-digit mobile number"),
+    ),
+  password: z.string(),
 });
 
 export type EnrollStudentInput = z.input<typeof enrollStudentSchema>;
@@ -162,8 +169,8 @@ export const classFormSchema = z.object({
 
 export const transportRouteSchema = z.object({
   name: z.string().trim().min(1, "Route name is required"),
-  driverName: z.string().trim().min(1, "Driver name is required"),
-  vehicleNumber: z.string().trim().min(1, "Vehicle number is required"),
+  driverId: z.string().trim().min(1, "Select a driver"),
+  busId: z.string().trim().min(1, "Select a bus"),
   defaultFee: z.coerce.number().positive("Default fee must be greater than 0"),
 });
 

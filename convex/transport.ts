@@ -1,7 +1,7 @@
 import { v } from "convex/values";
-import { mutation, query, type QueryCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
-import { requireSchoolAdmin } from "./lib/auth";
+import { requireSchoolAdmin, requireSchoolViewer } from "./lib/auth";
 import { studentName } from "./lib/studentName";
 
 const MAX_SEARCH_LENGTH = 100;
@@ -58,10 +58,60 @@ const routeDocValidator = v.object({
   name: v.string(),
   driverName: v.string(),
   vehicleNumber: v.string(),
+  driverId: v.optional(v.id("users")),
+  busId: v.optional(v.id("buses")),
   defaultFee: v.number(),
   status: v.union(v.literal("active"), v.literal("inactive")),
   assignedCount: v.number(),
+  driverPhone: v.optional(v.string()),
 });
+
+function driverLabel(user: Doc<"users">) {
+  const name = user.name?.trim().replace(/\s+/g, " ");
+  if (name) {
+    return name;
+  }
+  if (user.phone?.trim()) {
+    return user.phone.trim();
+  }
+  return "Unnamed driver";
+}
+
+function isActiveDriver(user: Doc<"users"> | null): user is Doc<"users"> {
+  return (
+    user !== null &&
+    user.role === "teacher" &&
+    user.staffRole === "driver" &&
+    user.status === "active"
+  );
+}
+
+async function requireActiveDriver(
+  ctx: QueryCtx | MutationCtx,
+  driverId: Id<"users">,
+) {
+  const user = await ctx.db.get("users", driverId);
+  if (!isActiveDriver(user)) {
+    const teachers = await ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "teacher"))
+      .take(200);
+    const hasDriver = teachers.some(
+      (teacher) => teacher.staffRole === "driver" && teacher.status === "active",
+    );
+    throw new Error(hasDriver ? "Select an active driver" : "No drivers available");
+  }
+  return driverLabel(user);
+}
+
+async function requireBus(ctx: QueryCtx | MutationCtx, busId: Id<"buses">) {
+  const bus = await ctx.db.get("buses", busId);
+  if (!bus) {
+    const anyBus = await ctx.db.query("buses").take(1);
+    throw new Error(anyBus.length === 0 ? "No buses available" : "Select a bus");
+  }
+  return bus;
+}
 
 const assignmentRowValidator = v.object({
   _id: v.id("studentTransport"),
@@ -92,7 +142,7 @@ export const listRoutes = query({
   args: {},
   returns: v.array(routeDocValidator),
   handler: async (ctx) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     const routes = await ctx.db.query("transportRoutes").take(50);
     const rows = [];
     for (const route of routes) {
@@ -107,9 +157,14 @@ export const listRoutes = query({
           assignedCount += 1;
         }
       }
+      const driver = route.driverId
+        ? await ctx.db.get("users", route.driverId)
+        : null;
+      const driverPhone = driver?.phone?.trim() || undefined;
       rows.push({
         ...route,
         assignedCount,
+        ...(driverPhone ? { driverPhone } : {}),
       });
     }
     return rows;
@@ -120,7 +175,7 @@ export const listAssignmentsForRoute = query({
   args: { routeId: v.id("transportRoutes") },
   returns: v.array(assignmentRowValidator),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     const route = await ctx.db.get("transportRoutes", args.routeId);
     if (!route) {
       throw new Error("Route not found");
@@ -157,7 +212,7 @@ export const listStudentRows = query({
   },
   returns: v.array(studentTransportRowValidator),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     const term = normalizeSearchTerm(args.search);
     if (!term && !args.routeId) {
       return [];
@@ -223,29 +278,76 @@ export const listStudentRows = query({
   },
 });
 
+export const routeChoices = query({
+  args: {},
+  returns: v.object({
+    drivers: v.array(
+      v.object({
+        userId: v.id("users"),
+        name: v.string(),
+      }),
+    ),
+    buses: v.array(
+      v.object({
+        busId: v.id("buses"),
+        name: v.string(),
+        number: v.string(),
+      }),
+    ),
+  }),
+  handler: async (ctx) => {
+    await requireSchoolViewer(ctx);
+    const teachers = await ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "teacher"))
+      .take(200);
+    const drivers = teachers
+      .filter((user) => user.staffRole === "driver" && user.status === "active")
+      .map((user) => ({
+        userId: user._id,
+        name: driverLabel(user),
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    const buses = (await ctx.db.query("buses").take(100))
+      .map((bus) => ({
+        busId: bus._id,
+        name: bus.name,
+        number: bus.number,
+      }))
+      .sort(
+        (left, right) =>
+          left.name.localeCompare(right.name) ||
+          left.number.localeCompare(right.number),
+      );
+    return { drivers, buses };
+  },
+});
+
 export const createRoute = mutation({
   args: {
     name: v.string(),
-    driverName: v.string(),
-    vehicleNumber: v.string(),
+    driverId: v.id("users"),
+    busId: v.id("buses"),
     defaultFee: v.number(),
   },
   returns: v.id("transportRoutes"),
   handler: async (ctx, args) => {
     await requireSchoolAdmin(ctx);
     const name = args.name.trim();
-    const driverName = args.driverName.trim();
-    const vehicleNumber = args.vehicleNumber.trim();
-    if (!name || !driverName || !vehicleNumber) {
-      throw new Error("Route name, driver, and vehicle number are required");
+    if (!name) {
+      throw new Error("Route name, driver, and bus are required");
     }
     if (!Number.isFinite(args.defaultFee) || args.defaultFee <= 0) {
       throw new Error("Default route fee must be greater than 0");
     }
+    const driverName = await requireActiveDriver(ctx, args.driverId);
+    const bus = await requireBus(ctx, args.busId);
     return await ctx.db.insert("transportRoutes", {
       name,
+      driverId: args.driverId,
+      busId: args.busId,
       driverName,
-      vehicleNumber,
+      vehicleNumber: bus.number,
       defaultFee: args.defaultFee,
       status: "active",
     });
@@ -256,8 +358,8 @@ export const updateRoute = mutation({
   args: {
     routeId: v.id("transportRoutes"),
     name: v.string(),
-    driverName: v.string(),
-    vehicleNumber: v.string(),
+    driverId: v.id("users"),
+    busId: v.id("buses"),
     defaultFee: v.number(),
     status: v.union(v.literal("active"), v.literal("inactive")),
   },
@@ -268,13 +370,21 @@ export const updateRoute = mutation({
     if (!route) {
       throw new Error("Route not found");
     }
+    const name = args.name.trim();
+    if (!name) {
+      throw new Error("Route name, driver, and bus are required");
+    }
     if (!Number.isFinite(args.defaultFee) || args.defaultFee <= 0) {
       throw new Error("Default route fee must be greater than 0");
     }
+    const driverName = await requireActiveDriver(ctx, args.driverId);
+    const bus = await requireBus(ctx, args.busId);
     await ctx.db.patch("transportRoutes", args.routeId, {
-      name: args.name.trim(),
-      driverName: args.driverName.trim(),
-      vehicleNumber: args.vehicleNumber.trim(),
+      name,
+      driverId: args.driverId,
+      busId: args.busId,
+      driverName,
+      vehicleNumber: bus.number,
       defaultFee: args.defaultFee,
       status: args.status,
     });

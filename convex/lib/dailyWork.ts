@@ -1,7 +1,14 @@
 import { ConvexError, v } from "convex/values";
 import { Doc, Id } from "../_generated/dataModel";
 import { MutationCtx, QueryCtx } from "../_generated/server";
-import { getCurrentUser, isIsoDate, isSchoolAdmin, requireRoles } from "./auth";
+import {
+  canViewSchoolAdmin,
+  getCurrentUser,
+  isIsoDate,
+  isSchoolAdmin,
+  rejectObserver,
+  requireRoles,
+} from "./auth";
 import { assistantIdsOf, slotsTaughtBy } from "./timetableAssistants";
 
 export type WorkTable = "homework" | "classwork";
@@ -237,6 +244,13 @@ function canReviewClass(user: Doc<"users">, classId: Id<"classes">) {
   );
 }
 
+function canViewClassWork(user: Doc<"users">, classId: Id<"classes">) {
+  return (
+    canViewSchoolAdmin(user) ||
+    (user.staffRole === "incharge" && (user.classIds ?? []).includes(classId))
+  );
+}
+
 export async function forClassDateRows(
   ctx: QueryCtx,
   table: WorkTable,
@@ -244,7 +258,7 @@ export async function forClassDateRows(
   date: string,
 ) {
   const user = await getCurrentUser(ctx);
-  if (!canReviewClass(user, classId)) {
+  if (!canViewClassWork(user, classId)) {
     throw new Error("Unauthorized: insufficient role");
   }
   const day = weekdayFromIso(date);
@@ -396,6 +410,7 @@ export async function saveDailyWork(
   },
 ) {
   const user = await requireRoles(ctx, ["teacher"]);
+  rejectObserver(user);
   const day = weekdayFromIso(args.date);
   if (!day) {
     throw new ConvexError("There is no timetable on Sunday");
@@ -444,6 +459,7 @@ export async function updateDailyWork(
   },
 ) {
   const user = await getCurrentUser(ctx);
+  rejectObserver(user);
   if (!canReviewClass(user, args.classId)) {
     throw new Error("Unauthorized: insufficient role");
   }

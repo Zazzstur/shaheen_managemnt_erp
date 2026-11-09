@@ -46,6 +46,32 @@ export function isSchoolAdmin(user: {
   return user.role === "super_admin" || user.staffRole === "data_entry";
 }
 
+/** School admins and observers. Use for navigation, route access, and read queries. */
+export function canViewSchoolAdmin(user: {
+  role: string;
+  staffRole?: string;
+}): boolean {
+  return isSchoolAdmin(user) || user.staffRole === "observer";
+}
+
+export function isAssignableTeacher(user: { staffRole?: string }): boolean {
+  return (
+    user.staffRole !== "driver" &&
+    user.staffRole !== "staff" &&
+    user.staffRole !== "observer"
+  );
+}
+
+export function signsInAsStaff(staffRole: string | undefined): boolean {
+  return staffRole !== "driver" && staffRole !== "staff";
+}
+
+export function rejectObserver(user: { staffRole?: string }) {
+  if (user.staffRole === "observer") {
+    throw new Error("Unauthorized: insufficient role");
+  }
+}
+
 export async function requireSchoolAdmin(
   ctx: QueryCtx | MutationCtx,
 ): Promise<Doc<"users">> {
@@ -56,12 +82,22 @@ export async function requireSchoolAdmin(
   return user;
 }
 
+export async function requireSchoolViewer(
+  ctx: QueryCtx | MutationCtx,
+): Promise<Doc<"users">> {
+  const user = await getCurrentUser(ctx);
+  if (!canViewSchoolAdmin(user)) {
+    throw new Error("Unauthorized: insufficient role");
+  }
+  return user;
+}
+
 export async function requireRolesIncludingDataEntry(
   ctx: QueryCtx | MutationCtx,
   roles: ReadonlyArray<UserRole>,
 ): Promise<Doc<"users">> {
   const user = await getCurrentUser(ctx);
-  if (user.staffRole === "data_entry" && roles.includes("super_admin")) {
+  if (canViewSchoolAdmin(user) && roles.includes("super_admin")) {
     return user;
   }
   if (!roles.includes(user.role)) {

@@ -3,6 +3,7 @@ import { ConvexError, v } from "convex/values";
 import { createAccount } from "@convex-dev/auth/server";
 import {
   action,
+  internalMutation,
   internalQuery,
   mutation,
   query,
@@ -11,11 +12,17 @@ import {
 } from "./_generated/server";
 import { type Doc, type Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { getCurrentUser, requireSuperAdmin } from "./lib/auth";
+import {
+  getCurrentUser,
+  isAssignableTeacher,
+  requireSuperAdmin,
+  signsInAsStaff,
+} from "./lib/auth";
 import {
   allTimetableSlots,
   assistantIdsOf,
 } from "./lib/timetableAssistants";
+import { parseEmployment } from "./staff";
 import {
   staffRoleValidator,
   userDocValidator,
@@ -88,7 +95,10 @@ export const listTeachers = query({
     return await ctx.db
       .query("users")
       .withIndex("by_role", (q) => q.eq("role", "teacher"))
-      .take(200);
+      .take(200)
+      .then((users) =>
+        users.filter((user) => isAssignableTeacher(user)),
+      );
   },
 });
 
@@ -184,6 +194,11 @@ export const setStaffRole = mutation({
     }
     if (target.role !== "teacher") {
       throw new ConvexError("Staff roles can only be assigned to teacher logins");
+    }
+    if (signsInAsStaff(target.staffRole) !== signsInAsStaff(args.staffRole)) {
+      throw new ConvexError(
+        "A sign-in role cannot be changed into a non-login role, or the reverse",
+      );
     }
     if (args.staffRole === "class_teacher" && args.classId) {
       await assertClassTeacherAvailable(ctx, args.classId, args.userId);
@@ -286,6 +301,45 @@ export const teacherEmailTaken = internalQuery({
       .withIndex("email", (q) => q.eq("email", args.email))
       .unique();
     return existing !== null;
+  },
+});
+
+export const teacherPhoneTaken = internalQuery({
+  args: { phone: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx);
+    const existing = await ctx.db
+      .query("users")
+      .withIndex("phone", (q) => q.eq("phone", args.phone))
+      .take(1);
+    return existing.length > 0;
+  },
+});
+
+export const insertOfficeStaff = internalMutation({
+  args: {
+    name: v.string(),
+    phone: v.string(),
+    staffRole: v.union(v.literal("driver"), v.literal("staff")),
+    monthlySalary: v.optional(v.number()),
+    joiningDate: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx);
+    await ctx.db.insert("users", {
+      name: args.name,
+      phone: args.phone,
+      role: "teacher",
+      status: "active",
+      staffRole: args.staffRole,
+      ...(args.monthlySalary !== undefined
+        ? { monthlySalary: args.monthlySalary }
+        : {}),
+      ...(args.joiningDate ? { joiningDate: args.joiningDate } : {}),
+    });
+    return null;
   },
 });
 
@@ -478,61 +532,109 @@ export const deleteTeacher = mutation({
 export const createTeacher = action({
   args: {
     name: v.string(),
-    email: v.string(),
-    password: v.string(),
+    email: v.optional(v.string()),
+    password: v.optional(v.string()),
+    phone: v.string(),
     staffRole: v.optional(staffRoleValidator),
     classId: v.optional(v.id("classes")),
     classIds: v.optional(v.array(v.id("classes"))),
+    monthlySalary: v.optional(v.number()),
+    joiningDate: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
     await ctx.runQuery(internal.users.assertSuperAdmin, {});
     const name = args.name.trim();
-    const email = args.email.trim().toLowerCase();
     if (!name) {
       throw new Error("Name is required");
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new Error("Enter a valid email");
+    const phone = args.phone.replace(/\D/g, "");
+    if (!/^[6-9]\d{9}$/.test(phone)) {
+      throw new Error("Enter a 10-digit mobile number");
     }
-    if (args.password.length < 8) {
-      throw new Error("Password must be at least 8 characters");
-    }
-    const taken = await ctx.runQuery(internal.users.teacherEmailTaken, {
-      email,
+    const phoneTaken = await ctx.runQuery(internal.users.teacherPhoneTaken, {
+      phone,
     });
-    if (taken) {
-      throw new Error("An account with this email already exists");
+    if (phoneTaken) {
+      throw new Error("An account with this phone number already exists");
     }
     const staffRole = args.staffRole ?? "teacher";
-    if (staffRole === "class_teacher" && !args.classId) {
-      throw new Error("Select a class for the class teacher");
-    }
-    if (staffRole === "class_teacher" && args.classId) {
-      await ctx.runQuery(internal.users.assertClassAvailable, {
-        classId: args.classId,
-      });
-    }
-    const classIds =
-      staffRole === "incharge"
-        ? await ctx.runQuery(internal.users.assertClassesExist, {
-            classIds: args.classIds ?? [],
-          })
-        : [];
-    await createAccount(ctx, {
-      provider: "password",
-      account: { id: email, secret: args.password },
-      profile: {
+    const signsIn = staffRole !== "driver" && staffRole !== "staff";
+    if (signsIn) {
+      const email = args.email?.trim().toLowerCase() ?? "";
+      const password = args.password ?? "";
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        throw new Error("Enter a valid email");
+      }
+      if (password.length < 8) {
+        throw new Error("Password must be at least 8 characters");
+      }
+      const taken = await ctx.runQuery(internal.users.teacherEmailTaken, {
         email,
-        name,
-        role: "teacher",
-        status: "active",
-        staffRole,
-        ...(staffRole === "class_teacher" && args.classId
-          ? { classId: args.classId }
-          : {}),
-        ...(staffRole === "incharge" ? { classIds } : {}),
-      },
+      });
+      if (taken) {
+        throw new Error("An account with this email already exists");
+      }
+      if (staffRole === "class_teacher" && !args.classId) {
+        throw new Error("Select a class for the class teacher");
+      }
+      if (staffRole === "class_teacher" && args.classId) {
+        await ctx.runQuery(internal.users.assertClassAvailable, {
+          classId: args.classId,
+        });
+      }
+      const classIds =
+        staffRole === "incharge"
+          ? await ctx.runQuery(internal.users.assertClassesExist, {
+              classIds: args.classIds ?? [],
+            })
+          : [];
+      if (
+        (args.monthlySalary === undefined) !== (args.joiningDate === undefined)
+      ) {
+        throw new Error(
+          "Set both monthly salary and joining date, or leave both empty",
+        );
+      }
+      const employment =
+        args.monthlySalary !== undefined && args.joiningDate !== undefined
+          ? parseEmployment(args.monthlySalary, args.joiningDate)
+          : undefined;
+      await createAccount(ctx, {
+        provider: "password",
+        account: { id: email, secret: password },
+        profile: {
+          email,
+          name,
+          phone,
+          role: "teacher",
+          status: "active",
+          staffRole,
+          ...(staffRole === "class_teacher" && args.classId
+            ? { classId: args.classId }
+            : {}),
+          ...(staffRole === "incharge" ? { classIds } : {}),
+          ...(employment ?? {}),
+        },
+      });
+      return null;
+    }
+    if (
+      (args.monthlySalary === undefined) !== (args.joiningDate === undefined)
+    ) {
+      throw new Error(
+        "Set both monthly salary and joining date, or leave both empty",
+      );
+    }
+    const employment =
+      args.monthlySalary !== undefined && args.joiningDate !== undefined
+        ? parseEmployment(args.monthlySalary, args.joiningDate)
+        : undefined;
+    await ctx.runMutation(internal.users.insertOfficeStaff, {
+      name,
+      phone,
+      staffRole,
+      ...(employment ?? {}),
     });
     return null;
   },

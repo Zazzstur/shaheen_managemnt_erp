@@ -7,7 +7,7 @@ import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { toast } from "sonner";
 import { mutationResult } from "@/lib/result";
-import { isSchoolAdmin } from "@/lib/access";
+import { canViewSchoolAdmin, isSchoolAdmin } from "@/lib/access";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PersonField } from "@/components/person-field";
@@ -57,7 +57,7 @@ export default function TimetablePage() {
   const upsertSlot = useMutation(api.timetables.upsertSlot);
   const clearSlot = useMutation(api.timetables.clearSlot);
   const isAdmin = me ? isSchoolAdmin(me) : false;
-  const isTeacher = me?.role === "teacher";
+  const isTeacher = me?.role === "teacher" && !canViewSchoolAdmin(me);
   const mySlots = useQuery(api.timetables.listMine, isTeacher ? {} : "skip");
 
   const assignSlot = async (args: {

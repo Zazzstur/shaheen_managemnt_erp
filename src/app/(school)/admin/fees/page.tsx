@@ -8,7 +8,7 @@ import { Download } from "lucide-react";
 import { domToBlob } from "modern-screenshot";
 import { toast } from "sonner";
 import { mutationResult } from "@/lib/result";
-import { isSchoolAdmin } from "@/lib/access";
+import { canViewSchoolAdmin } from "@/lib/access";
 import { downloadCsv } from "@/lib/downloadCsv";
 import {
   downloadBlob,
@@ -1265,7 +1265,7 @@ export default function FeesPage() {
   } | null>(null);
   const [downloading, setDownloading] = useState(false);
   const trimmed = term.trim();
-  const isAdmin = me ? isSchoolAdmin(me) : false;
+  const isAdmin = me ? canViewSchoolAdmin(me) : false;
   const canCollect = me?.role === "super_admin";
   const idle = classId === "" && trimmed.length === 0;
   const filtering =

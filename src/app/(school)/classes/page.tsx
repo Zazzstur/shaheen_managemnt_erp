@@ -11,7 +11,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { feeYearLabel, feeYearStartYear } from "@convex/lib/feeLedger";
 import { classFormSchema, type ClassFormInput } from "@/lib/schemas";
 import { mutationResult } from "@/lib/result";
-import { isSchoolAdmin } from "@/lib/access";
+import { canViewSchoolAdmin } from "@/lib/access";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -96,7 +96,7 @@ export default function ClassesPage() {
 
   const canEdit = me?.role === "super_admin";
 
-  if (me && !isSchoolAdmin(me)) {
+  if (me && !canViewSchoolAdmin(me)) {
     return (
       <p className="text-sm text-muted-foreground">
         Only super admins can manage classes and fee structures.

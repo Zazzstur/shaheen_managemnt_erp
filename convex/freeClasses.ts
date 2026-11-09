@@ -1,7 +1,13 @@
 import { ConvexError, v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
-import { getCurrentUser, isIsoDate, isSchoolAdmin } from "./lib/auth";
+import {
+  canViewSchoolAdmin,
+  getCurrentUser,
+  isAssignableTeacher,
+  isIsoDate,
+  isSchoolAdmin,
+} from "./lib/auth";
 import { assistantIdsOf } from "./lib/timetableAssistants";
 import { dayOfWeekValidator } from "./lib/validators";
 
@@ -77,9 +83,9 @@ async function listStaff(ctx: QueryCtx | MutationCtx) {
     .query("users")
     .withIndex("by_role", (q) => q.eq("role", "super_admin"))
     .take(50);
-  return [...teachers, ...admins].sort((a, b) =>
-    displayName(a).localeCompare(displayName(b)),
-  );
+    return [...teachers, ...admins]
+      .filter((user) => isAssignableTeacher(user))
+      .sort((a, b) => displayName(a).localeCompare(displayName(b)));
 }
 
 async function slotsOnDay(ctx: QueryCtx | MutationCtx, day: Weekday) {
@@ -134,7 +140,7 @@ export const forDate = query({
   handler: async (ctx, args) => {
     const user = await getCurrentUser(ctx);
     const incharge = user.staffRole === "incharge";
-    if (!isSchoolAdmin(user) && !incharge) {
+    if (!canViewSchoolAdmin(user) && !incharge) {
       throw new Error("Unauthorized: insufficient role");
     }
     const assignedClasses = new Set(user.classIds ?? []);

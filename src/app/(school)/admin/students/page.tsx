@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
+import { canViewSchoolAdmin, isSchoolAdmin } from "@/lib/access";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -78,6 +79,7 @@ const enrollDefaults: EnrollStudentInput = {
 };
 
 export default function StudentsPage() {
+  const me = useQuery(api.users.me);
   const classes = useQuery(api.catalog.listClasses);
   const seedDefaults = useMutation(api.catalog.seedDefaults);
   const enroll = useMutation(api.students.enroll);
@@ -194,6 +196,19 @@ export default function StudentsPage() {
     }
   });
 
+  const canView = me ? canViewSchoolAdmin(me) : false;
+  const canEdit = me ? isSchoolAdmin(me) : false;
+  if (me === undefined) {
+    return <p className="text-sm text-muted-foreground">Loading admissions…</p>;
+  }
+  if (!canView) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Only school admins can open admissions.
+      </p>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -203,6 +218,7 @@ export default function StudentsPage() {
         </p>
       </div>
 
+      {canEdit ? (
       <Card>
         <CardHeader>
           <CardTitle>Enroll student</CardTitle>
@@ -716,6 +732,11 @@ export default function StudentsPage() {
           </form>
         </CardContent>
       </Card>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Read-only. Observers cannot enroll students.
+        </p>
+      )}
 
       <Card>
         <CardHeader>

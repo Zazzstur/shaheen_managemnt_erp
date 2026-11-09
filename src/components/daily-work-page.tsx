@@ -8,7 +8,7 @@ import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { Share2 } from "lucide-react";
 import { toast } from "sonner";
-import { isSchoolAdmin } from "@/lib/access";
+import { canViewSchoolAdmin, isSchoolAdmin } from "@/lib/access";
 import { mutationResult } from "@/lib/result";
 import { cn } from "@/lib/utils";
 import {
@@ -210,7 +210,7 @@ function WorkSheet({
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-xs font-medium tracking-wide text-neutral-500 uppercase">
+        <p className="text-xs font-semibold tracking-wide text-neutral-500 uppercase">
           {heading}
         </p>
         <p className="text-2xl font-semibold">{classLabel}</p>
@@ -222,7 +222,7 @@ function WorkSheet({
             Period {row.periodNumber}
           </p>
           <p className="font-semibold">{row.subjectName}</p>
-          <p className="script-text mt-1 text-sm whitespace-pre-wrap" dir="auto">
+          <p className="script-text mt-1 text-sm font-semibold whitespace-pre-wrap" dir="auto">
             {row.message.trim() || emptyMessage}
           </p>
         </div>
@@ -246,10 +246,12 @@ export function DailyWorkPage({
   const endpoints = ENDPOINTS[kind];
   const me = useQuery(api.users.me);
   const isAdmin = Boolean(me && isSchoolAdmin(me));
+  const canView = Boolean(me && canViewSchoolAdmin(me));
   const isIncharge = me?.staffRole === "incharge";
-  const canReview = assignment && (isAdmin || isIncharge);
+  const canReview = assignment && (canView || isIncharge);
+  const canEditReview = assignment && (isAdmin || isIncharge);
   const canEnter =
-    me?.role === "teacher" && me.staffRole !== "data_entry" && !canReview;
+    me?.role === "teacher" && !canView && me.staffRole !== "data_entry" && !canReview;
   const classes = useQuery(api.catalog.listClasses, canReview ? {} : "skip");
   const reviewClasses = (classes ?? []).filter((classroom) =>
     isAdmin ? true : (me?.classIds ?? []).includes(classroom._id),
@@ -342,7 +344,8 @@ export function DailyWorkPage({
           try {
             const blob = await domToBlob(node, {
               backgroundColor: "#FDFBF3",
-              scale: 1,
+              scale: 3,
+              type: "image/png",
             });
             if (cancelled) {
               return;
@@ -643,7 +646,7 @@ export function DailyWorkPage({
               <div className="divide-y">
                 {group.rows.map((row) => {
                   const key = rowKey(row);
-                  const editing = canReview && editingKey === key;
+                  const editing = canEditReview && editingKey === key;
                   return (
                     <div
                       key={key}
@@ -727,7 +730,7 @@ export function DailyWorkPage({
                             >
                               {row.message || copy.emptyMessage}
                             </p>
-                            {canReview ? (
+                            {canEditReview ? (
                               <div className="flex justify-end">
                                 <Button
                                   type="button"

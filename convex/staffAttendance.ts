@@ -1,7 +1,12 @@
 import { ConvexError, v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
-import { getCurrentUser, isIsoDate, isSchoolAdmin } from "./lib/auth";
+import {
+  canViewSchoolAdmin,
+  getCurrentUser,
+  isIsoDate,
+  isSchoolAdmin,
+} from "./lib/auth";
 import { attendanceStatusValidator } from "./lib/validators";
 
 const staffRowValidator = v.object({
@@ -39,6 +44,15 @@ function roleLabel(user: Doc<"users">) {
   if (user.staffRole === "incharge") {
     return "Incharge";
   }
+  if (user.staffRole === "driver") {
+    return "Driver";
+  }
+  if (user.staffRole === "staff") {
+    return "Staff";
+  }
+  if (user.staffRole === "observer") {
+    return "Observer";
+  }
   return "Teacher";
 }
 
@@ -61,7 +75,7 @@ export const forDate = query({
   returns: v.array(staffRowValidator),
   handler: async (ctx, args) => {
     const user = await getCurrentUser(ctx);
-    if (!isSchoolAdmin(user)) {
+    if (!canViewSchoolAdmin(user)) {
       throw new Error("Unauthorized: insufficient role");
     }
     if (!isIsoDate(args.date)) {
@@ -186,5 +200,84 @@ export const save = mutation({
       }
     }
     return null;
+  },
+});
+
+function isYearMonth(value: string) {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
+}
+
+function monthAfter(month: string) {
+  const [year, mon] = month.split("-").map(Number);
+  const next = new Date(Date.UTC(year, mon, 1));
+  const nextMonth = String(next.getUTCMonth() + 1).padStart(2, "0");
+  return `${next.getUTCFullYear()}-${nextMonth}-01`;
+}
+
+const monthRowValidator = v.object({
+  teacherId: v.id("users"),
+  name: v.string(),
+  email: v.optional(v.string()),
+  roleLabel: v.string(),
+  present: v.number(),
+  absent: v.number(),
+  late: v.number(),
+  absentDates: v.array(v.string()),
+});
+
+export const forMonth = query({
+  args: { month: v.string() },
+  returns: v.array(monthRowValidator),
+  handler: async (ctx, args) => {
+    const user = await getCurrentUser(ctx);
+    if (!canViewSchoolAdmin(user)) {
+      throw new Error("Unauthorized: insufficient role");
+    }
+    if (!isYearMonth(args.month)) {
+      throw new ConvexError("Month must be YYYY-MM");
+    }
+    const staff = await listStaff(ctx);
+    const saved = await ctx.db
+      .query("staffAttendance")
+      .withIndex("by_date", (q) =>
+        q.gte("date", `${args.month}-01`).lt("date", monthAfter(args.month)),
+      )
+      .take(8000);
+    const byTeacher = new Map<
+      Id<"users">,
+      { present: number; absent: number; late: number; absentDates: string[] }
+    >();
+    for (const row of saved) {
+      const current = byTeacher.get(row.teacherId) ?? {
+        present: 0,
+        absent: 0,
+        late: 0,
+        absentDates: [],
+      };
+      if (row.status === "present") {
+        current.present += 1;
+      } else if (row.status === "absent") {
+        current.absent += 1;
+        current.absentDates.push(row.date);
+      } else {
+        current.late += 1;
+      }
+      byTeacher.set(row.teacherId, current);
+    }
+
+    return staff.map((teacher) => {
+      const email = teacher.email?.trim();
+      const counts = byTeacher.get(teacher._id);
+      return {
+        teacherId: teacher._id,
+        name: displayName(teacher),
+        ...(email ? { email } : {}),
+        roleLabel: roleLabel(teacher),
+        present: counts?.present ?? 0,
+        absent: counts?.absent ?? 0,
+        late: counts?.late ?? 0,
+        absentDates: (counts?.absentDates ?? []).sort(),
+      };
+    });
   },
 });

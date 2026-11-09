@@ -10,7 +10,12 @@ import {
 } from "./lib/feeLedger";
 import { Doc, Id } from "./_generated/dataModel";
 import { uniqueInvoiceNumber } from "./lib/feeQuote";
-import { isIsoDate, requireRoles, requireSchoolAdmin } from "./lib/auth";
+import {
+  isIsoDate,
+  requireRoles,
+  requireSchoolAdmin,
+  requireSchoolViewer,
+} from "./lib/auth";
 import { studentName } from "./lib/studentName";
 import {
   genderValidator,
@@ -40,7 +45,7 @@ export const list = query({
     ),
   }),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     const result = args.classId
       ? await ctx.db
           .query("students")
@@ -71,7 +76,7 @@ export const listByClass = query({
   args: { classId: v.id("classes") },
   returns: v.array(studentListItemValidator),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     const students = await ctx.db
       .query("students")
       .withIndex("by_class", (q) => q.eq("classId", args.classId))
@@ -1021,7 +1026,7 @@ export const exportRows = query({
   args: { asOf: v.string() },
   returns: v.array(exportRowValidator),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     if (!isIsoDate(args.asOf)) {
       throw new Error("Date must be YYYY-MM-DD");
     }
@@ -1109,7 +1114,7 @@ export const directory = query({
   },
   returns: v.array(directoryRowValidator),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     if (!isIsoDate(args.asOf)) {
       throw new Error("Date must be YYYY-MM-DD");
     }
@@ -1373,7 +1378,7 @@ export const profile = query({
   args: { studentId: v.id("students"), asOf: v.string() },
   returns: v.union(profileValidator, v.null()),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     if (!isIsoDate(args.asOf)) {
       throw new Error("Date must be YYYY-MM-DD");
     }

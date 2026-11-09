@@ -6,7 +6,7 @@ import Link from "next/link";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { toast } from "sonner";
-import { isSchoolAdmin } from "@/lib/access";
+import { canViewSchoolAdmin, isSchoolAdmin } from "@/lib/access";
 import { mutationResult } from "@/lib/result";
 import { PickerGroup } from "@/components/picker-group";
 import {
@@ -188,9 +188,12 @@ class FreeClassesErrorBoundary extends Component<
 function FreeClassesBody({ date }: { date: string }) {
   const me = useQuery(api.users.me);
   const allowed = me
+    ? canViewSchoolAdmin(me) || me.staffRole === "incharge"
+    : false;
+  const canEdit = me
     ? isSchoolAdmin(me) || me.staffRole === "incharge"
     : false;
-  const canOpenStaffAttendance = me ? isSchoolAdmin(me) : false;
+  const canOpenStaffAttendance = me ? canViewSchoolAdmin(me) : false;
   const data = useQuery(api.freeClasses.forDate, allowed ? { date } : "skip");
   const setCover = useMutation(api.freeClasses.setCover);
   const [savingSlotId, setSavingSlotId] = useState<Id<"timetables"> | null>(
@@ -334,6 +337,7 @@ function FreeClassesBody({ date }: { date: string }) {
                     <TableCell>{period.subjectName}</TableCell>
                     <TableCell>{period.absentTeacherName}</TableCell>
                     <TableCell>
+                      {canEdit ? (
                       <CoverSelect
                         timetableId={period.timetableId}
                         coverTeacherId={period.coverTeacherId}
@@ -342,6 +346,11 @@ function FreeClassesBody({ date }: { date: string }) {
                         disabled={savingSlotId === period.timetableId}
                         onCover={onCover}
                       />
+                      ) : (
+                        <span className="text-sm text-muted-foreground">
+                          {period.coverTeacherId ? "Cover assigned" : "No cover"}
+                        </span>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

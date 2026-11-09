@@ -6,6 +6,7 @@ import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { toast } from "sonner";
 import { mutationResult } from "@/lib/result";
+import { isSchoolAdmin } from "@/lib/access";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -120,6 +121,8 @@ export function StudentDetailDialog({
     const day = String(now.getDate()).padStart(2, "0");
     return `${now.getFullYear()}-${month}-${day}`;
   });
+  const me = useQuery(api.users.me);
+  const canEdit = me ? isSchoolAdmin(me) : false;
   const profile = useQuery(
     api.students.profile,
     studentId ? { studentId, asOf } : "skip",
@@ -295,7 +298,7 @@ export function StudentDetailDialog({
               {saving ? "Saving…" : "Save"}
             </Button>
           </div>
-        ) : (
+        ) : canEdit ? (
           <Button
             type="button"
             size="sm"
@@ -305,7 +308,7 @@ export function StudentDetailDialog({
           >
             Edit
           </Button>
-        )}
+        ) : null}
 
         {profile === undefined ? (
           <p className="text-sm text-muted-foreground">Loading student…</p>

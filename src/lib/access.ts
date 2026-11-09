@@ -5,6 +5,13 @@ export function isSchoolAdmin(user: {
   return user.role === "super_admin" || user.staffRole === "data_entry";
 }
 
+export function canViewSchoolAdmin(user: {
+  role: string;
+  staffRole?: string;
+}): boolean {
+  return isSchoolAdmin(user) || user.staffRole === "observer";
+}
+
 export function canOpenNavItem(
   item: {
     roles: readonly string[];
@@ -14,6 +21,9 @@ export function canOpenNavItem(
   role: string,
   staffRole?: string,
 ) {
+  if (staffRole === "observer") {
+    return item.roles.includes("super_admin");
+  }
   if (item.staffRoles && role === "teacher") {
     return item.staffRoles.includes(staffRole ?? "");
   }

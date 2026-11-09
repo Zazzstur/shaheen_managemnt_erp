@@ -7,7 +7,7 @@ import { Id } from "@convex/_generated/dataModel";
 import { ChevronDown, ChevronRight, Download, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { mutationResult } from "@/lib/result";
-import { isSchoolAdmin } from "@/lib/access";
+import { canViewSchoolAdmin, isSchoolAdmin } from "@/lib/access";
 import { downloadCsv } from "@/lib/downloadCsv";
 import { parseStudentCsv, studentCsvTemplate } from "@/lib/studentCsv";
 import { Button } from "@/components/ui/button";
@@ -86,11 +86,12 @@ export default function StudentsDirectoryPage() {
   const [downloading, setDownloading] = useState(false);
 
   const canView = me?.role === "super_admin" || me?.role === "teacher";
+  const viewAdmin = me ? canViewSchoolAdmin(me) : false;
   const canEnroll = me ? isSchoolAdmin(me) : false;
-  const isTeacher = me?.role === "teacher" && me.staffRole !== "data_entry";
+  const isTeacher = me?.role === "teacher" && !viewAdmin;
   const rows = useQuery(
     api.students.directory,
-    canEnroll && (classId || search)
+    viewAdmin && (classId || search)
       ? {
           ...(classId ? { classId } : {}),
           feeFilter,
@@ -652,7 +653,7 @@ export default function StudentsDirectoryPage() {
           )}
         </CardContent>
       </Card>
-      {canEnroll ? (
+      {viewAdmin ? (
         <StudentDetailDialog
           studentId={selectedStudentId}
           onOpenChange={(open) => {

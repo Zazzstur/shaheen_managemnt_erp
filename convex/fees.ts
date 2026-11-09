@@ -5,10 +5,11 @@ import { Doc, Id } from "./_generated/dataModel";
 import {
   assertStudentAccess,
   isIsoDate,
-  isSchoolAdmin,
+  canViewSchoolAdmin,
   requireRoles,
   requireRolesIncludingDataEntry,
   requireSchoolAdmin,
+  requireSchoolViewer,
   requireSuperAdmin,
 } from "./lib/auth";
 import {
@@ -62,7 +63,7 @@ export const list = query({
       "student",
     ]);
     const result =
-      args.status && isSchoolAdmin(user)
+      args.status && canViewSchoolAdmin(user)
         ? await ctx.db
             .query("fees")
             .withIndex("by_status", (q) => q.eq("status", args.status!))
@@ -96,7 +97,7 @@ export const quoteForStudent = query({
   args: { studentId: v.id("students") },
   returns: feeQuoteValidator,
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     return await quoteStudentFee(ctx, args.studentId);
   },
 });
@@ -553,7 +554,7 @@ export const searchStudents = query({
   args: { term: v.string() },
   returns: v.array(searchHitValidator),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     const term = normalizeFeeSearchTerm(args.term);
     if (term.length < 1) {
       return [];
@@ -603,7 +604,7 @@ export const filterStudents = query({
   },
   returns: v.array(filterHitValidator),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     if (!isIsoDate(args.asOf)) {
       throw new Error("Date must be YYYY-MM-DD");
     }
@@ -1002,7 +1003,7 @@ export const schoolSnapshot = query({
     studentsWithDue: v.number(),
   }),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     assertDateRange(args.collectionFrom, args.collectionTo);
     if (!isIsoDate(args.asOf)) {
       throw new Error("Date must be YYYY-MM-DD");
@@ -1066,7 +1067,7 @@ export const collectionReport = query({
     rows: v.array(collectionRowValidator),
   }),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     assertDateRange(args.from, args.to);
     const students = await enrolledStudents(ctx, args.classId);
     const rows = [];
@@ -1131,7 +1132,7 @@ export const dueReport = query({
     rows: v.array(dueRowValidator),
   }),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     assertDateRange(args.from, args.to);
     const fromMonth = args.from.slice(0, 7);
     const toMonth = args.to.slice(0, 7);
@@ -1189,7 +1190,7 @@ export const exportRows = query({
   args: { asOf: v.string() },
   returns: v.array(feeExportRowValidator),
   handler: async (ctx, args) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     if (!isIsoDate(args.asOf)) {
       throw new Error("Date must be YYYY-MM-DD");
     }
@@ -1227,7 +1228,7 @@ export const invoiceMessage = query({
   args: {},
   returns: v.string(),
   handler: async (ctx) => {
-    await requireSchoolAdmin(ctx);
+    await requireSchoolViewer(ctx);
     const notice = await ctx.db.query("invoiceNotice").first();
     return notice?.message ?? "";
   },

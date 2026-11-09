@@ -30,6 +30,8 @@ export default defineSchema({
     staffRole: v.optional(staffRoleValidator),
     classId: v.optional(v.id("classes")),
     classIds: v.optional(v.array(v.id("classes"))),
+    monthlySalary: v.optional(v.number()),
+    joiningDate: v.optional(v.string()),
   })
     .index("email", ["email"])
     .index("phone", ["phone"])
@@ -206,6 +208,8 @@ export default defineSchema({
     name: v.string(),
     driverName: v.string(),
     vehicleNumber: v.string(),
+    driverId: v.optional(v.id("users")),
+    busId: v.optional(v.id("buses")),
     defaultFee: v.number(),
     status: v.union(v.literal("active"), v.literal("inactive")),
   }).index("by_status", ["status"]),
@@ -250,4 +254,85 @@ export default defineSchema({
     effectiveMonth: v.string(),
     changedBy: v.id("users"),
   }).index("by_student", ["studentId"]),
+
+  staffPayments: defineTable({
+    userId: v.id("users"),
+    amount: v.number(),
+    paidOn: v.string(),
+    month: v.string(),
+    mode: v.union(v.literal("cash"), v.literal("online")),
+    note: v.optional(v.string()),
+    recordedBy: v.id("users"),
+  })
+    .index("by_user", ["userId"])
+    .index("by_month", ["month"]),
+
+  buses: defineTable({
+    name: v.string(),
+    number: v.string(),
+    startingOdometer: v.number(),
+    odometer: v.number(),
+  }).index("by_number", ["number"]),
+
+  fuelPurchases: defineTable({
+    busId: v.id("buses"),
+    date: v.string(),
+    odometer: v.number(),
+    liters: v.number(),
+    price: v.number(),
+    recordedBy: v.id("users"),
+  })
+    .index("by_bus", ["busId"])
+    .index("by_date", ["date"]),
+
+  stockItems: defineTable({
+    name: v.string(),
+    nameKey: v.string(),
+    quantity: v.number(),
+    price: v.optional(v.number()),
+  }).index("by_name", ["nameKey"]),
+
+  stockPurchases: defineTable({
+    itemId: v.id("stockItems"),
+    date: v.string(),
+    quantity: v.number(),
+    total: v.number(),
+    recordedBy: v.id("users"),
+  }).index("by_date", ["date"]),
+
+  stockHoldings: defineTable({
+    userId: v.id("users"),
+    itemId: v.id("stockItems"),
+    quantity: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_and_item", ["userId", "itemId"]),
+
+  stockIssues: defineTable({
+    itemId: v.id("stockItems"),
+    quantity: v.number(),
+    mode: v.union(v.literal("give"), v.literal("lend")),
+    fromUserId: v.id("users"),
+    toUserId: v.id("users"),
+    date: v.string(),
+    returnedQuantity: v.number(),
+    note: v.optional(v.string()),
+    recordedBy: v.id("users"),
+  })
+    .index("by_mode", ["mode"])
+    .index("by_from", ["fromUserId"]),
+
+  officeExpenses: defineTable({
+    amount: v.number(),
+    description: v.string(),
+    date: v.string(),
+    recordedBy: v.id("users"),
+  }).index("by_date", ["date"]),
+
+  pageStars: defineTable({
+    userId: v.id("users"),
+    path: v.string(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_and_path", ["userId", "path"]),
 });

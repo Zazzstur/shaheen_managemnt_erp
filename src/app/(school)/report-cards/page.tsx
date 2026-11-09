@@ -716,7 +716,7 @@ export default function ReportCardsPage() {
       </p>
     );
   }
-  if (me.role === "teacher") {
+  if (me.role === "teacher" && me.staffRole !== "observer") {
     return <TeacherMarksEntry />;
   }
 

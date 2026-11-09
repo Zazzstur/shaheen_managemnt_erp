@@ -4,7 +4,7 @@ import { Component, useState, type ReactNode } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
-import { isSchoolAdmin } from "@/lib/access";
+import { canViewSchoolAdmin } from "@/lib/access";
 import { mutationResult } from "@/lib/result";
 import { PersonField } from "@/components/person-field";
 import { Label } from "@/components/ui/label";
@@ -67,7 +67,7 @@ function TeachersTimetableBody({
 }) {
   const me = useQuery(api.users.me);
   const allowed = me
-    ? isSchoolAdmin(me) || me.staffRole === "incharge"
+    ? canViewSchoolAdmin(me) || me.staffRole === "incharge"
     : false;
   const teachers = useQuery(
     api.timetables.listTimetableTeachers,

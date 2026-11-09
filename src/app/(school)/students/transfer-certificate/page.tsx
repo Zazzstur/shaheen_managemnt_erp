@@ -5,7 +5,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { toast } from "sonner";
 import { mutationResult } from "@/lib/result";
-import { isSchoolAdmin } from "@/lib/access";
+import { canViewSchoolAdmin, isSchoolAdmin } from "@/lib/access";
 import {
   EnrolledStudentSearch,
   type EnrolledStudentHit,
@@ -31,6 +31,7 @@ import {
 export default function TransferCertificatePage() {
   const me = useQuery(api.users.me);
   const admin = me ? isSchoolAdmin(me) : false;
+  const canView = me ? canViewSchoolAdmin(me) : false;
   const withdraw = useMutation(api.studentMoves.withdraw);
   const [student, setStudent] = useState<EnrolledStudentHit | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -47,11 +48,23 @@ export default function TransferCertificatePage() {
       </p>
     );
   }
-  if (!admin) {
+  if (!canView) {
     return (
       <p className="text-sm text-muted-foreground">
         Only school admins can issue a transfer certificate.
       </p>
+    );
+  }
+  if (!admin) {
+    return (
+      <div className="space-y-2">
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Transfer certificate
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          Read-only. Observers cannot withdraw a student.
+        </p>
+      </div>
     );
   }
 

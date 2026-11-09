@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { isIsoDate, requireRoles } from "./lib/auth";
+import { isIsoDate, rejectObserver, requireRoles } from "./lib/auth";
 
 const examDocValidator = v.object({
   _id: v.id("exams"),
@@ -34,7 +34,7 @@ export const create = mutation({
   },
   returns: v.id("exams"),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin", "teacher"]);
+    rejectObserver(await requireRoles(ctx, ["super_admin", "teacher"]));
     const title = args.title.trim();
     if (!title) {
       throw new Error("Exam title is required");
@@ -64,7 +64,7 @@ export const recordMark = mutation({
   },
   returns: v.id("marks"),
   handler: async (ctx, args) => {
-    await requireRoles(ctx, ["super_admin", "teacher"]);
+    rejectObserver(await requireRoles(ctx, ["super_admin", "teacher"]));
     const exam = await ctx.db.get("exams", args.examId);
     if (!exam) {
       throw new Error("Exam not found");

@@ -15,7 +15,7 @@ export function whatsAppAppUrl(phone: string, text: string) {
   return `whatsapp://send${query ? `?${query}` : ""}`;
 }
 
-const maxClipboardEdge = 1600;
+const maxClipboardEdge = 4096;
 
 export async function prepareClipboardPng(blob: Blob) {
   try {
@@ -34,6 +34,8 @@ export async function prepareClipboardPng(blob: Blob) {
         ? blob
         : new Blob([blob], { type: "image/png" });
     }
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
     context.fillStyle = "#FDFBF3";
     context.fillRect(0, 0, width, height);
     context.drawImage(bitmap, 0, 0, width, height);

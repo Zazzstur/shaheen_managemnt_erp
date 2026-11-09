@@ -13,7 +13,7 @@ import {
   type TransportRouteInput,
 } from "@/lib/schemas";
 import { mutationResult } from "@/lib/result";
-import { isSchoolAdmin } from "@/lib/access";
+import { canViewSchoolAdmin, isSchoolAdmin } from "@/lib/access";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,6 +38,7 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import {
   Table,
@@ -53,16 +54,60 @@ function money(value: number) {
   return value.toFixed(2);
 }
 
+const NO_DRIVERS: { userId: Id<"users">; name: string }[] = [];
+const NO_BUSES: { busId: Id<"buses">; name: string; number: string }[] = [];
+
+function sameText(left: string, right: string) {
+  return left.trim().toLowerCase().replace(/\s+/g, " ") ===
+    right.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function sameNumber(left: string, right: string) {
+  return left.trim().toUpperCase().replace(/\s+/g, " ") ===
+    right.trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+function uniqueDriverId(
+  driverName: string,
+  drivers: { userId: Id<"users">; name: string }[],
+) {
+  const matches = drivers.filter((driver) => sameText(driver.name, driverName));
+  return matches.length === 1 ? matches[0].userId : "";
+}
+
+function uniqueBusId(
+  vehicleNumber: string,
+  buses: { busId: Id<"buses">; name: string; number: string }[],
+) {
+  const matches = buses.filter((bus) => {
+    const label = `${bus.name} · ${bus.number}`;
+    return sameNumber(bus.number, vehicleNumber) || sameText(label, vehicleNumber);
+  });
+  return matches.length === 1 ? matches[0].busId : "";
+}
+
 export default function TransportPage() {
   const me = useQuery(api.users.me);
   const routes = useQuery(api.transport.listRoutes);
+  const choices = useQuery(
+    api.transport.routeChoices,
+    me && isSchoolAdmin(me) ? {} : "skip",
+  );
+  const canView = Boolean(me && canViewSchoolAdmin(me));
+  const canEdit = Boolean(me && isSchoolAdmin(me));
   const createRoute = useMutation(api.transport.createRoute);
+  const updateRoute = useMutation(api.transport.updateRoute);
   const assignStudent = useMutation(api.transport.assignStudent);
   const setCustomFee = useMutation(api.transport.setCustomFee);
   const setStop = useMutation(api.transport.setStop);
   const unassignStudent = useMutation(api.transport.unassignStudent);
 
   const [routeOpen, setRouteOpen] = useState(false);
+  const [editingRouteId, setEditingRouteId] = useState<Id<"transportRoutes"> | null>(
+    null,
+  );
+  const [legacyDriver, setLegacyDriver] = useState("");
+  const [legacyBus, setLegacyBus] = useState("");
   const [expandedRouteId, setExpandedRouteId] = useState<
     Id<"transportRoutes"> | null
   >(null);
@@ -93,13 +138,109 @@ export default function TransportPage() {
     resolver: zodResolver(transportRouteSchema),
     defaultValues: {
       name: "",
-      driverName: "",
-      vehicleNumber: "",
+      driverId: "",
+      busId: "",
       defaultFee: 0,
     },
   });
+  const driverId = routeForm.watch("driverId");
+  const busId = routeForm.watch("busId");
+  const drivers = choices?.drivers ?? NO_DRIVERS;
+  const buses = choices?.buses ?? NO_BUSES;
+  const driverItems = Object.fromEntries(
+    drivers.map((driver) => [driver.userId, driver.name]),
+  );
+  const busItems = Object.fromEntries(
+    buses.map((bus) => [bus.busId, `${bus.name} · ${bus.number}`]),
+  );
+  const driverPlaceholder =
+    choices && drivers.length === 0 ? "No drivers" : "Select driver";
+  const busPlaceholder = choices && buses.length === 0 ? "No buses" : "Select bus";
 
-  if (me && !isSchoolAdmin(me)) {
+  function closeRouteDialog() {
+    setRouteOpen(false);
+    setEditingRouteId(null);
+    setLegacyDriver("");
+    setLegacyBus("");
+  }
+
+  function openCreate() {
+    setEditingRouteId(null);
+    setLegacyDriver("");
+    setLegacyBus("");
+    routeForm.reset({
+      name: "",
+      driverId: "",
+      busId: "",
+      defaultFee: 0,
+    });
+    setRouteOpen(true);
+  }
+
+  function openEdit(route: NonNullable<typeof routes>[number]) {
+    const nextDriverId =
+      route.driverId && drivers.some((driver) => driver.userId === route.driverId)
+        ? route.driverId
+        : route.driverId
+          ? ""
+          : uniqueDriverId(route.driverName, drivers);
+    const nextBusId =
+      route.busId && buses.some((bus) => bus.busId === route.busId)
+        ? route.busId
+        : route.busId
+          ? ""
+          : uniqueBusId(route.vehicleNumber, buses);
+    setEditingRouteId(route._id);
+    setLegacyDriver(nextDriverId ? "" : route.driverName);
+    setLegacyBus(nextBusId ? "" : route.vehicleNumber);
+    routeForm.reset({
+      name: route.name,
+      driverId: nextDriverId,
+      busId: nextBusId,
+      defaultFee: route.defaultFee,
+    });
+    setRouteOpen(true);
+  }
+
+  useEffect(() => {
+    if (!routeOpen || !editingRouteId || !choices || !routes) {
+      return;
+    }
+    const route = routes.find((item) => item._id === editingRouteId);
+    if (!route) {
+      return;
+    }
+    if (!routeForm.getValues("driverId")) {
+      const matched =
+        route.driverId && drivers.some((driver) => driver.userId === route.driverId)
+          ? route.driverId
+          : route.driverId
+            ? ""
+            : uniqueDriverId(route.driverName, drivers);
+      if (matched) {
+        routeForm.setValue("driverId", matched, { shouldValidate: true });
+        setLegacyDriver("");
+      } else {
+        setLegacyDriver(route.driverName);
+      }
+    }
+    if (!routeForm.getValues("busId")) {
+      const matched =
+        route.busId && buses.some((bus) => bus.busId === route.busId)
+          ? route.busId
+          : route.busId
+            ? ""
+            : uniqueBusId(route.vehicleNumber, buses);
+      if (matched) {
+        routeForm.setValue("busId", matched, { shouldValidate: true });
+        setLegacyBus("");
+      } else {
+        setLegacyBus(route.vehicleNumber);
+      }
+    }
+  }, [routeOpen, editingRouteId, choices, routes, drivers, buses, routeForm]);
+
+  if (me && !canView) {
     return (
       <p className="text-sm text-muted-foreground">
         Only super admins can manage transport routes and fees.
@@ -107,12 +248,39 @@ export default function TransportPage() {
     );
   }
 
-  const onCreateRoute = routeForm.handleSubmit(async (values) => {
+  const onSaveRoute = routeForm.handleSubmit(async (values) => {
     try {
-      await createRoute(values);
-      toast.success("Route created");
-      routeForm.reset();
-      setRouteOpen(false);
+      if (editingRouteId) {
+        const route = routes?.find((item) => item._id === editingRouteId);
+        if (!route) {
+          toast.error("Route not found");
+          return;
+        }
+        await updateRoute({
+          routeId: editingRouteId,
+          name: values.name,
+          driverId: values.driverId as Id<"users">,
+          busId: values.busId as Id<"buses">,
+          defaultFee: values.defaultFee,
+          status: route.status,
+        });
+        toast.success("Route updated");
+      } else {
+        await createRoute({
+          name: values.name,
+          driverId: values.driverId as Id<"users">,
+          busId: values.busId as Id<"buses">,
+          defaultFee: values.defaultFee,
+        });
+        toast.success("Route created");
+      }
+      routeForm.reset({
+        name: "",
+        driverId: "",
+        busId: "",
+        defaultFee: 0,
+      });
+      closeRouteDialog();
     } catch (error) {
       toast.error(mutationResult(error).message);
     }
@@ -127,14 +295,13 @@ export default function TransportPage() {
             Manage bus routes, assign students, and override individual fees.
           </p>
         </div>
-        <Button
-          onClick={() => {
-            routeForm.reset();
-            setRouteOpen(true);
-          }}
-        >
-          Create new route
-        </Button>
+        {canEdit ? (
+          <Button onClick={openCreate}>Create new route</Button>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Read-only. Observers cannot change routes or assignments.
+          </p>
+        )}
       </div>
 
       <Card>
@@ -155,31 +322,54 @@ export default function TransportPage() {
             <div className="space-y-2">
               {routes.map((route) => {
                 const expanded = expandedRouteId === route._id;
+                const driverLabel = route.driverId
+                  ? (drivers.find((driver) => driver.userId === route.driverId)
+                      ?.name ?? route.driverName)
+                  : route.driverName;
+                const bus = route.busId
+                  ? buses.find((item) => item.busId === route.busId)
+                  : undefined;
+                const busLabel = bus
+                  ? `${bus.name} · ${bus.number}`
+                  : route.vehicleNumber;
                 return (
                   <div key={route._id} className="rounded-lg border">
-                    <button
-                      type="button"
-                      className="flex w-full items-start gap-3 p-3 text-left"
-                      onClick={() =>
-                        setExpandedRouteId(expanded ? null : route._id)
-                      }
-                    >
-                      {expanded ? (
-                        <ChevronDown className="mt-0.5 size-4" />
-                      ) : (
-                        <ChevronRight className="mt-0.5 size-4" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium">{route.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {route.driverName} · {route.vehicleNumber} · default{" "}
-                          {money(route.defaultFee)}
-                        </p>
-                      </div>
+                    <div className="flex w-full items-start gap-3 p-3">
+                      <button
+                        type="button"
+                        className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                        onClick={() =>
+                          setExpandedRouteId(expanded ? null : route._id)
+                        }
+                      >
+                        {expanded ? (
+                          <ChevronDown className="mt-0.5 size-4" />
+                        ) : (
+                          <ChevronRight className="mt-0.5 size-4" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium">{route.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {driverLabel}
+                            {route.driverPhone ? ` · ${route.driverPhone}` : ""} ·{" "}
+                            {busLabel} · default {money(route.defaultFee)}
+                          </p>
+                        </div>
+                      </button>
+                      {canEdit ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openEdit(route)}
+                      >
+                        Edit
+                      </Button>
+                      ) : null}
                       <Badge variant="secondary">
                         {route.assignedCount} students
                       </Badge>
-                    </button>
+                    </div>
                     {expanded ? (
                       <div className="border-t p-3">
                         {assignments === undefined ? (
@@ -339,6 +529,7 @@ export default function TransportPage() {
                     </TableCell>
                     <TableCell>{row.classLabel}</TableCell>
                     <TableCell>
+                      {canEdit ? (
                       <Select
                         value={row.routeId ?? null}
                         onValueChange={(routeId) => {
@@ -368,8 +559,12 @@ export default function TransportPage() {
                           ))}
                         </SelectContent>
                       </Select>
+                      ) : (
+                        <span>{row.routeName ?? "Unassigned"}</span>
+                      )}
                     </TableCell>
                     <TableCell>
+                      {canEdit ? (
                       <StudentStopInput
                         disabled={!row.routeId}
                         savedValue={row.stopName ?? ""}
@@ -385,6 +580,9 @@ export default function TransportPage() {
                           }
                         }}
                       />
+                      ) : (
+                        <span>{row.stopName || "—"}</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       {row.effectiveFee !== undefined
@@ -397,38 +595,42 @@ export default function TransportPage() {
                       ) : null}
                     </TableCell>
                     <TableCell className="space-x-2 text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={!row.routeId}
-                        onClick={() => {
-                          setFeeStudentId(row.studentId);
-                          setCustomFeeValue(
-                            row.customFee !== undefined
-                              ? String(row.customFee)
-                              : String(row.defaultFee ?? ""),
-                          );
-                        }}
-                      >
-                        Custom fee
-                      </Button>
-                      {row.assignmentId ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={async () => {
-                            try {
-                              await unassignStudent({
-                                studentId: row.studentId,
-                              });
-                              toast.success("Student unassigned");
-                            } catch (error) {
-                              toast.error(mutationResult(error).message);
-                            }
-                          }}
-                        >
-                          Remove
-                        </Button>
+                      {canEdit ? (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={!row.routeId}
+                            onClick={() => {
+                              setFeeStudentId(row.studentId);
+                              setCustomFeeValue(
+                                row.customFee !== undefined
+                                  ? String(row.customFee)
+                                  : String(row.defaultFee ?? ""),
+                              );
+                            }}
+                          >
+                            Custom fee
+                          </Button>
+                          {row.assignmentId ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={async () => {
+                                try {
+                                  await unassignStudent({
+                                    studentId: row.studentId,
+                                  });
+                                  toast.success("Student unassigned");
+                                } catch (error) {
+                                  toast.error(mutationResult(error).message);
+                                }
+                              }}
+                            >
+                              Remove
+                            </Button>
+                          ) : null}
+                        </>
                       ) : null}
                     </TableCell>
                   </TableRow>
@@ -439,15 +641,26 @@ export default function TransportPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={routeOpen} onOpenChange={setRouteOpen}>
+      <Dialog
+        open={routeOpen}
+        onOpenChange={(next) => {
+          if (next) {
+            setRouteOpen(true);
+            return;
+          }
+          closeRouteDialog();
+        }}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create new route</DialogTitle>
+            <DialogTitle>
+              {editingRouteId ? "Edit route" : "Create new route"}
+            </DialogTitle>
             <DialogDescription>
               The default flat fee applies until a student has a custom override.
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={onCreateRoute} className="space-y-4">
+          <form onSubmit={onSaveRoute} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="routeName">Route name</Label>
               <Input
@@ -455,17 +668,105 @@ export default function TransportPage() {
                 placeholder="Route A - City Center"
                 {...routeForm.register("name")}
               />
+              {routeForm.formState.errors.name ? (
+                <p className="text-xs text-destructive">
+                  {routeForm.formState.errors.name.message}
+                </p>
+              ) : null}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="driverName">Driver name</Label>
-              <Input id="driverName" {...routeForm.register("driverName")} />
+              <Label htmlFor="driverId">Driver</Label>
+              <Select
+                value={driverId}
+                items={driverItems}
+                onValueChange={(next) => {
+                  if (!next || next === "__no_driver") {
+                    return;
+                  }
+                  routeForm.setValue("driverId", next, { shouldValidate: true });
+                  setLegacyDriver("");
+                }}
+              >
+                <SelectTrigger id="driverId" className="w-full">
+                  <SelectValue placeholder={driverPlaceholder}>
+                    {(value: unknown) => {
+                      const key = typeof value === "string" ? value : "";
+                      if (key && driverItems[key]) {
+                        return driverItems[key];
+                      }
+                      if (legacyDriver) {
+                        return legacyDriver;
+                      }
+                      return driverPlaceholder;
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {choices && drivers.length === 0 ? (
+                    <SelectItem value="__no_driver" disabled>
+                      No drivers
+                    </SelectItem>
+                  ) : (
+                    drivers.map((driver) => (
+                      <SelectItem key={driver.userId} value={driver.userId}>
+                        {driver.name}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+              {routeForm.formState.errors.driverId ? (
+                <p className="text-xs text-destructive">
+                  {routeForm.formState.errors.driverId.message}
+                </p>
+              ) : null}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="vehicleNumber">Vehicle number</Label>
-              <Input
-                id="vehicleNumber"
-                {...routeForm.register("vehicleNumber")}
-              />
+              <Label htmlFor="busId">Bus</Label>
+              <Select
+                value={busId}
+                items={busItems}
+                onValueChange={(next) => {
+                  if (!next || next === "__no_bus") {
+                    return;
+                  }
+                  routeForm.setValue("busId", next, { shouldValidate: true });
+                  setLegacyBus("");
+                }}
+              >
+                <SelectTrigger id="busId" className="w-full">
+                  <SelectValue placeholder={busPlaceholder}>
+                    {(value: unknown) => {
+                      const key = typeof value === "string" ? value : "";
+                      if (key && busItems[key]) {
+                        return busItems[key];
+                      }
+                      if (legacyBus) {
+                        return legacyBus;
+                      }
+                      return busPlaceholder;
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {choices && buses.length === 0 ? (
+                    <SelectItem value="__no_bus" disabled>
+                      No buses
+                    </SelectItem>
+                  ) : (
+                    buses.map((bus) => (
+                      <SelectItem key={bus.busId} value={bus.busId}>
+                        {bus.name} · {bus.number}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+              {routeForm.formState.errors.busId ? (
+                <p className="text-xs text-destructive">
+                  {routeForm.formState.errors.busId.message}
+                </p>
+              ) : null}
             </div>
             <div className="space-y-2">
               <Label htmlFor="defaultFee">Default route flat fee</Label>
@@ -476,13 +777,14 @@ export default function TransportPage() {
                 min="0"
                 {...routeForm.register("defaultFee")}
               />
+              {routeForm.formState.errors.defaultFee ? (
+                <p className="text-xs text-destructive">
+                  {routeForm.formState.errors.defaultFee.message}
+                </p>
+              ) : null}
             </div>
             <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setRouteOpen(false)}
-              >
+              <Button type="button" variant="outline" onClick={closeRouteDialog}>
                 Cancel
               </Button>
               <Button

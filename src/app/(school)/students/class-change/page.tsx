@@ -6,7 +6,7 @@ import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { toast } from "sonner";
 import { mutationResult } from "@/lib/result";
-import { isSchoolAdmin } from "@/lib/access";
+import { canViewSchoolAdmin, isSchoolAdmin } from "@/lib/access";
 import {
   feeYearRange,
   feeYearStartYear,
@@ -64,6 +64,7 @@ function classOptionLabel(classroom: {
 export default function ClassChangePage() {
   const me = useQuery(api.users.me);
   const admin = me ? isSchoolAdmin(me) : false;
+  const canView = me ? canViewSchoolAdmin(me) : false;
   const classes = useQuery(api.studentMoves.listClasses, admin ? {} : "skip");
   const changeClass = useMutation(api.studentMoves.changeClass);
   const [student, setStudent] = useState<EnrolledStudentHit | null>(null);
@@ -82,11 +83,21 @@ export default function ClassChangePage() {
       </p>
     );
   }
-  if (!admin) {
+  if (!canView) {
     return (
       <p className="text-sm text-muted-foreground">
         Only school admins can change a student&apos;s class.
       </p>
+    );
+  }
+  if (!admin) {
+    return (
+      <div className="space-y-2">
+        <h1 className="text-2xl font-semibold tracking-tight">Class change</h1>
+        <p className="text-sm text-muted-foreground">
+          Read-only. Observers cannot change a student&apos;s class.
+        </p>
+      </div>
     );
   }
 

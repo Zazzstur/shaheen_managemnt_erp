@@ -2,9 +2,10 @@ import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
 import {
+  canViewSchoolAdmin,
   getCurrentUser,
+  isAssignableTeacher,
   isIncharge,
-  isSchoolAdmin,
   requireRoles,
   requireSchoolAdmin,
 } from "./lib/auth";
@@ -41,7 +42,7 @@ export const listTeachers = query({
       .query("users")
       .withIndex("by_role", (q) => q.eq("role", "super_admin"))
       .take(50);
-    return [...teachers, ...admins];
+    return [...teachers, ...admins].filter((user) => isAssignableTeacher(user));
   },
 });
 
@@ -155,7 +156,7 @@ const viewedTeacherSlotValidator = v.object({
 
 async function requireTimetableViewer(ctx: QueryCtx | MutationCtx) {
   const user = await getCurrentUser(ctx);
-  if (!isSchoolAdmin(user) && !isIncharge(user)) {
+  if (!canViewSchoolAdmin(user) && !isIncharge(user)) {
     throw new Error("Unauthorized: insufficient role");
   }
   return user;
@@ -175,6 +176,7 @@ export const listTimetableTeachers = query({
       .withIndex("by_role", (q) => q.eq("role", "super_admin"))
       .take(50);
     return [...teachers, ...admins]
+      .filter((teacher) => isAssignableTeacher(teacher))
       .map((teacher) => ({
         _id: teacher._id,
         name: teacher.name ?? teacher.email ?? "Unnamed",

@@ -10,6 +10,7 @@
 
 import type * as attendance from "../attendance.js";
 import type * as auth from "../auth.js";
+import type * as cashFlow from "../cashFlow.js";
 import type * as catalog from "../catalog.js";
 import type * as classes from "../classes.js";
 import type * as classwork from "../classwork.js";
@@ -27,9 +28,11 @@ import type * as lib_dailyWork from "../lib/dailyWork.js";
 import type * as lib_feeLedger from "../lib/feeLedger.js";
 import type * as lib_feeQuote from "../lib/feeQuote.js";
 import type * as lib_roles from "../lib/roles.js";
+import type * as lib_salaryHistory from "../lib/salaryHistory.js";
 import type * as lib_studentName from "../lib/studentName.js";
 import type * as lib_timetableAssistants from "../lib/timetableAssistants.js";
 import type * as lib_validators from "../lib/validators.js";
+import type * as monthlyTests from "../monthlyTests.js";
 import type * as pageStars from "../pageStars.js";
 import type * as reportCards from "../reportCards.js";
 import type * as staff from "../staff.js";
@@ -50,6 +53,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   attendance: typeof attendance;
   auth: typeof auth;
+  cashFlow: typeof cashFlow;
   catalog: typeof catalog;
   classes: typeof classes;
   classwork: typeof classwork;
@@ -67,9 +71,11 @@ declare const fullApi: ApiFromModules<{
   "lib/feeLedger": typeof lib_feeLedger;
   "lib/feeQuote": typeof lib_feeQuote;
   "lib/roles": typeof lib_roles;
+  "lib/salaryHistory": typeof lib_salaryHistory;
   "lib/studentName": typeof lib_studentName;
   "lib/timetableAssistants": typeof lib_timetableAssistants;
   "lib/validators": typeof lib_validators;
+  monthlyTests: typeof monthlyTests;
   pageStars: typeof pageStars;
   reportCards: typeof reportCards;
   staff: typeof staff;

@@ -204,6 +204,24 @@ export default defineSchema({
     .index("by_student", ["studentId"])
     .index("by_exam_and_student", ["examId", "studentId"]),
 
+  monthlyTests: defineTable({
+    classId: v.id("classes"),
+    subjectId: v.id("subjects"),
+    month: v.string(),
+    maxMarks: v.number(),
+  })
+    .index("by_class_and_month", ["classId", "month"])
+    .index("by_class_subject_and_month", ["classId", "subjectId", "month"]),
+
+  monthlyTestMarks: defineTable({
+    testId: v.id("monthlyTests"),
+    studentId: v.id("students"),
+    marksObtained: v.union(v.number(), v.literal("AB")),
+  })
+    .index("by_test", ["testId"])
+    .index("by_test_and_student", ["testId", "studentId"])
+    .index("by_student", ["studentId"]),
+
   transportRoutes: defineTable({
     name: v.string(),
     driverName: v.string(),
@@ -267,6 +285,14 @@ export default defineSchema({
     .index("by_user", ["userId"])
     .index("by_month", ["month"]),
 
+  staffSalaries: defineTable({
+    userId: v.id("users"),
+    monthlySalary: v.number(),
+    effectiveMonth: v.string(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_and_month", ["userId", "effectiveMonth"]),
+
   buses: defineTable({
     name: v.string(),
     number: v.string(),
@@ -281,6 +307,16 @@ export default defineSchema({
     liters: v.number(),
     price: v.number(),
     recordedBy: v.id("users"),
+    original: v.optional(
+      v.object({
+        busId: v.id("buses"),
+        date: v.string(),
+        odometer: v.number(),
+        liters: v.number(),
+        price: v.number(),
+        previousOdometer: v.number(),
+      }),
+    ),
   })
     .index("by_bus", ["busId"])
     .index("by_date", ["date"]),
@@ -327,6 +363,14 @@ export default defineSchema({
     description: v.string(),
     date: v.string(),
     recordedBy: v.id("users"),
+  }).index("by_date", ["date"]),
+
+  schoolFunds: defineTable({
+    amount: v.number(),
+    date: v.string(),
+    note: v.optional(v.string()),
+    mode: v.optional(v.union(v.literal("cash"), v.literal("online"))),
+    enteredBy: v.id("users"),
   }).index("by_date", ["date"]),
 
   pageStars: defineTable({

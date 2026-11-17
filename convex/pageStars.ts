@@ -40,6 +40,7 @@ const STAR_RULES: readonly StarRule[] = [
     staffRoles: ["incharge"],
   },
   { path: "/report-cards", roles: ["super_admin", "teacher"] },
+  { path: "/monthly-tests", roles: ["super_admin", "teacher"] },
   { path: "/transport", roles: ["super_admin"] },
   { path: "/fuel", roles: ["super_admin"] },
   { path: "/admin/users", roles: ["super_admin"] },
@@ -58,6 +59,7 @@ const STAR_RULES: readonly StarRule[] = [
   },
   { path: "/admin/fees", roles: ["super_admin", "parent", "student"] },
   { path: "/expenses", roles: ["super_admin"] },
+  { path: "/cash-flow", roles: ["super_admin"] },
 ];
 
 function isInternalAppPath(path: string) {

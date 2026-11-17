@@ -7,6 +7,11 @@ import {
   requireSchoolViewer,
   signsInAsStaff,
 } from "./lib/auth";
+import {
+  indiaYearMonth,
+  salarySchedule,
+  type SalaryRate,
+} from "./lib/salaryHistory";
 import { staffRoleValidator, userStatusValidator } from "./lib/validators";
 
 const MAX_MONTHLY_SALARY = 10_000_000;
@@ -89,6 +94,75 @@ function normalizeSalary(value: number) {
   return cents / 100;
 }
 
+async function salaryRates(ctx: QueryCtx | MutationCtx, userId: Id<"users">) {
+  const rows = await ctx.db
+    .query("staffSalaries")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .take(200);
+  const byMonth = new Map<string, { monthlySalary: number; created: number }>();
+  for (const row of rows) {
+    const current = byMonth.get(row.effectiveMonth);
+    if (!current || row._creationTime >= current.created) {
+      byMonth.set(row.effectiveMonth, {
+        monthlySalary: row.monthlySalary,
+        created: row._creationTime,
+      });
+    }
+  }
+  return [...byMonth.entries()].map(
+    ([effectiveMonth, value]): SalaryRate => ({
+      effectiveMonth,
+      monthlySalary: value.monthlySalary,
+    }),
+  );
+}
+
+async function saveEmployment(
+  ctx: MutationCtx,
+  user: Doc<"users">,
+  monthlySalary: number,
+  joiningDate: string,
+) {
+  const employment = parseEmployment(monthlySalary, joiningDate);
+  const previous = user.monthlySalary;
+  if (previous !== undefined && previous !== employment.monthlySalary) {
+    const joinMonth = employment.joiningDate.slice(0, 7);
+    const changeMonth = indiaYearMonth();
+    const revisions = await ctx.db
+      .query("staffSalaries")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .take(200);
+    if (revisions.length >= 200) {
+      throw new ConvexError("This staff member already has 200 salary changes");
+    }
+    const effectiveMonth = changeMonth > joinMonth ? changeMonth : joinMonth;
+    if (revisions.length === 0 && changeMonth > joinMonth) {
+      await ctx.db.insert("staffSalaries", {
+        userId: user._id,
+        monthlySalary: previous,
+        effectiveMonth: joinMonth,
+      });
+    }
+    if (revisions.length > 0 || changeMonth > joinMonth) {
+      const existing = revisions.find((row) => row.effectiveMonth === effectiveMonth);
+      if (existing) {
+        if (existing.monthlySalary !== employment.monthlySalary) {
+          await ctx.db.patch("staffSalaries", existing._id, {
+            monthlySalary: employment.monthlySalary,
+          });
+        }
+      } else {
+        await ctx.db.insert("staffSalaries", {
+          userId: user._id,
+          monthlySalary: employment.monthlySalary,
+          effectiveMonth,
+        });
+      }
+    }
+  }
+  await ctx.db.patch("users", user._id, employment);
+}
+
 async function listStaff(ctx: QueryCtx | MutationCtx) {
   const teachers = await ctx.db
     .query("users")
@@ -141,8 +215,7 @@ export const setEmployment = mutation({
     if (!target || (target.role !== "teacher" && target.role !== "super_admin")) {
       throw new ConvexError("Staff member not found");
     }
-    const employment = parseEmployment(args.monthlySalary, args.joiningDate);
-    await ctx.db.patch("users", args.userId, employment);
+    await saveEmployment(ctx, target, args.monthlySalary, args.joiningDate);
     return null;
   },
 });
@@ -299,10 +372,9 @@ export const updateProfile = mutation({
         "Set both monthly salary and joining date, or leave both empty",
       );
     }
-    const employment =
-      hasSalary && args.joiningDate
-        ? parseEmployment(args.monthlySalary as number, args.joiningDate)
-        : undefined;
+    if (hasSalary && args.joiningDate) {
+      parseEmployment(args.monthlySalary as number, args.joiningDate);
+    }
     if (superAdmin && args.status && admin._id === target._id && args.status !== "active") {
       throw new ConvexError("You cannot deactivate your own account");
     }
@@ -310,8 +382,15 @@ export const updateProfile = mutation({
       name,
       ...(phone ? { phone } : {}),
       ...(superAdmin && args.status ? { status: args.status } : {}),
-      ...(employment ?? {}),
     });
+    if (hasSalary && args.joiningDate) {
+      await saveEmployment(
+        ctx,
+        target,
+        args.monthlySalary as number,
+        args.joiningDate,
+      );
+    }
     let current = await ctx.db.get("users", target._id);
     if (!current) {
       throw new ConvexError("Staff member not found");
@@ -382,20 +461,6 @@ export const updateProfile = mutation({
   },
 });
 
-function salaryMonths(joiningDate: string, asOf: string) {
-  if (!isIsoDate(joiningDate) || !isIsoDate(asOf)) {
-    return 0;
-  }
-  const start = joiningDate.slice(0, 7);
-  const end = asOf.slice(0, 7);
-  if (start > end) {
-    return 0;
-  }
-  const [startYear, startMonth] = start.split("-").map(Number);
-  const [endYear, endMonth] = end.split("-").map(Number);
-  return (endYear - startYear) * 12 + (endMonth - startMonth) + 1;
-}
-
 const monthPaymentValidator = v.object({
   id: v.id("staffPayments"),
   amount: v.number(),
@@ -404,12 +469,18 @@ const monthPaymentValidator = v.object({
   note: v.optional(v.string()),
 });
 
+const monthSalaryValidator = v.object({
+  month: v.string(),
+  salary: v.number(),
+});
+
 const monthRowValidator = v.object({
   userId: v.id("users"),
   name: v.string(),
   roleLabel: v.string(),
   monthlySalary: v.optional(v.number()),
   joiningDate: v.optional(v.string()),
+  monthSalaries: v.array(monthSalaryValidator),
   paid: v.number(),
   due: v.optional(v.number()),
   payments: v.array(monthPaymentValidator),
@@ -435,19 +506,35 @@ export const ledger = query({
         );
         const paid =
           Math.round(payments.reduce((sum, payment) => sum + payment.amount, 0) * 100) / 100;
-        const months = user.joiningDate ? salaryMonths(user.joiningDate, args.asOf) : 0;
+        const rates = await salaryRates(ctx, user._id);
+        const monthSalaries =
+          user.joiningDate && user.monthlySalary !== undefined
+            ? salarySchedule(
+                user.joiningDate,
+                args.asOf,
+                rates,
+                rates.length === 0 ? user.monthlySalary : undefined,
+              )
+            : [];
+        const asOfMonth = args.asOf.slice(0, 7);
+        const currentSalary =
+          monthSalaries.find((row) => row.month === asOfMonth)?.salary ??
+          user.monthlySalary;
+        const earnedCents = monthSalaries.reduce(
+          (sum, row) => sum + Math.round(row.salary * 100),
+          0,
+        );
         const due =
           user.monthlySalary !== undefined && user.joiningDate
-            ? Math.max(0, Math.round((user.monthlySalary * months - paid) * 100) / 100)
+            ? Math.max(0, (earnedCents - Math.round(paid * 100)) / 100)
             : undefined;
         return {
           userId: user._id,
           name: displayName(user),
           roleLabel: roleLabel(user),
-          ...(user.monthlySalary !== undefined
-            ? { monthlySalary: user.monthlySalary }
-            : {}),
+          ...(currentSalary !== undefined ? { monthlySalary: currentSalary } : {}),
           ...(user.joiningDate ? { joiningDate: user.joiningDate } : {}),
+          monthSalaries,
           paid,
           ...(due !== undefined ? { due } : {}),
           payments: payments.map((payment) => ({

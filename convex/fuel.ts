@@ -1,6 +1,6 @@
 import { ConvexError, v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
-import { QueryCtx, mutation, query } from "./_generated/server";
+import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
 import { isIsoDate, requireSchoolAdmin, requireSchoolViewer } from "./lib/auth";
 
 const MAX_ODOMETER = 10_000_000;
@@ -48,11 +48,48 @@ function assertOdometer(value: number) {
   }
 }
 
-async function purchasesForBus(ctx: QueryCtx, busId: Id<"buses">) {
+async function purchasesForBus(
+  ctx: QueryCtx | MutationCtx,
+  busId: Id<"buses">,
+) {
   return await ctx.db
     .query("fuelPurchases")
     .withIndex("by_bus", (q) => q.eq("busId", busId))
     .take(500);
+}
+
+function readingBefore(
+  startingOdometer: number,
+  purchases: Doc<"fuelPurchases">[],
+  odometer: number,
+  exceptId?: Id<"fuelPurchases">,
+) {
+  const earlier = purchases.filter(
+    (row) => row._id !== exceptId && row.odometer < odometer,
+  );
+  if (earlier.length === 0) {
+    return startingOdometer;
+  }
+  return Math.max(...earlier.map((row) => row.odometer));
+}
+
+function sameFill(
+  fill: Doc<"fuelPurchases">,
+  next: {
+    busId: Id<"buses">;
+    date: string;
+    odometer: number;
+    liters: number;
+    price: number;
+  },
+) {
+  return (
+    fill.busId === next.busId &&
+    fill.date === next.date &&
+    fill.odometer === next.odometer &&
+    fill.liters === next.liters &&
+    fill.price === next.price
+  );
 }
 
 function mileageSince(
@@ -95,14 +132,22 @@ export const overview = query({
         name: v.string(),
         number: v.string(),
         odometer: v.number(),
+        startingOdometer: v.number(),
         mileage: v.union(v.number(), v.null()),
         monthExpense: v.number(),
         monthLiters: v.number(),
+        readings: v.array(
+          v.object({
+            fillId: v.id("fuelPurchases"),
+            odometer: v.number(),
+          }),
+        ),
       }),
     ),
     fills: v.array(
       v.object({
         fillId: v.id("fuelPurchases"),
+        busId: v.id("buses"),
         busName: v.string(),
         busNumber: v.string(),
         date: v.string(),
@@ -110,6 +155,19 @@ export const overview = query({
         liters: v.number(),
         price: v.number(),
         mileage: v.union(v.number(), v.null()),
+        edited: v.boolean(),
+        original: v.union(
+          v.null(),
+          v.object({
+            busName: v.string(),
+            busNumber: v.string(),
+            date: v.string(),
+            odometer: v.number(),
+            liters: v.number(),
+            price: v.number(),
+            mileage: v.union(v.number(), v.null()),
+          }),
+        ),
       }),
     ),
   }),
@@ -126,18 +184,25 @@ export const overview = query({
       )
       .take(2000);
 
+    const purchasesByBus = new Map<Id<"buses">, Doc<"fuelPurchases">[]>();
     const busRows = [];
     for (const bus of buses.sort((a, b) => a.name.localeCompare(b.name))) {
       const purchases = await purchasesForBus(ctx, bus._id);
+      purchasesByBus.set(bus._id, purchases);
       const inMonth = monthFills.filter((row) => row.busId === bus._id);
       busRows.push({
         busId: bus._id,
         name: bus.name,
         number: bus.number,
         odometer: bus.odometer,
+        startingOdometer: bus.startingOdometer,
         mileage: mileageSince(bus.startingOdometer, purchases),
         monthExpense: round2(inMonth.reduce((sum, row) => sum + row.price, 0)),
         monthLiters: round2(inMonth.reduce((sum, row) => sum + row.liters, 0)),
+        readings: purchases.map((row) => ({
+          fillId: row._id,
+          odometer: row.odometer,
+        })),
       });
     }
 
@@ -148,14 +213,27 @@ export const overview = query({
       if (!bus) {
         continue;
       }
-      const purchases = await purchasesForBus(ctx, fill.busId);
-      const earlier = purchases.filter((row) => row.odometer < fill.odometer);
-      const previous =
-        earlier.length > 0
-          ? Math.max(...earlier.map((row) => row.odometer))
-          : bus.startingOdometer;
+      const purchases = purchasesByBus.get(fill.busId) ?? [];
+      const previous = readingBefore(
+        bus.startingOdometer,
+        purchases,
+        fill.odometer,
+        fill._id,
+      );
+      const stored = fill.original;
+      const edited = stored
+        ? !sameFill(fill, {
+            busId: stored.busId,
+            date: stored.date,
+            odometer: stored.odometer,
+            liters: stored.liters,
+            price: stored.price,
+          })
+        : false;
+      const originalBus = stored ? busById.get(stored.busId) : undefined;
       fills.push({
         fillId: fill._id,
+        busId: fill.busId,
         busName: bus.name,
         busNumber: bus.number,
         date: fill.date,
@@ -163,6 +241,23 @@ export const overview = query({
         liters: fill.liters,
         price: fill.price,
         mileage: fillMileage(previous, fill.odometer, fill.liters),
+        edited,
+        original:
+          stored && edited
+            ? {
+                busName: originalBus?.name ?? "Unknown bus",
+                busNumber: originalBus?.number ?? "",
+                date: stored.date,
+                odometer: stored.odometer,
+                liters: stored.liters,
+                price: stored.price,
+                mileage: fillMileage(
+                  stored.previousOdometer,
+                  stored.odometer,
+                  stored.liters,
+                ),
+              }
+            : null,
       });
     }
     fills.sort((a, b) => b.date.localeCompare(a.date) || b.odometer - a.odometer);
@@ -248,6 +343,118 @@ export const recordFuel = mutation({
       recordedBy: user._id,
     });
     await ctx.db.patch("buses", bus._id, { odometer: args.odometer });
+    return null;
+  },
+});
+
+async function syncBusOdometer(ctx: MutationCtx, busId: Id<"buses">) {
+  const bus = await ctx.db.get("buses", busId);
+  if (!bus) {
+    return;
+  }
+  const purchases = await purchasesForBus(ctx, busId);
+  const odometer = purchases.reduce(
+    (max, row) => Math.max(max, row.odometer),
+    bus.startingOdometer,
+  );
+  if (odometer !== bus.odometer) {
+    await ctx.db.patch("buses", busId, { odometer });
+  }
+}
+
+export const updateFuel = mutation({
+  args: {
+    fillId: v.id("fuelPurchases"),
+    busId: v.id("buses"),
+    date: v.string(),
+    odometer: v.number(),
+    liters: v.number(),
+    price: v.number(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireSchoolAdmin(ctx);
+    const fill = await ctx.db.get("fuelPurchases", args.fillId);
+    if (!fill) {
+      throw new ConvexError("Fuel entry not found");
+    }
+    const bus = await ctx.db.get("buses", args.busId);
+    if (!bus) {
+      throw new ConvexError("Bus not found");
+    }
+    if (!isIsoDate(args.date) || args.date > todayInIndia()) {
+      throw new ConvexError("Enter a valid date");
+    }
+    assertOdometer(args.odometer);
+    assertMoney(args.liters, "Fuel amount", MAX_LITERS);
+    assertMoney(args.price, "Price", MAX_PRICE);
+    if (
+      sameFill(fill, {
+        busId: args.busId,
+        date: args.date,
+        odometer: args.odometer,
+        liters: args.liters,
+        price: args.price,
+      })
+    ) {
+      return null;
+    }
+
+    const purchases = await purchasesForBus(ctx, bus._id);
+    const others = purchases.filter((row) => row._id !== fill._id);
+    const clash = others.find((row) => row.odometer === args.odometer);
+    if (clash) {
+      throw new ConvexError(
+        clash.date === args.date
+          ? "This fuel entry is already recorded"
+          : "Enter a valid odometer reading",
+      );
+    }
+    const previous = readingBefore(bus.startingOdometer, others, args.odometer);
+    if (args.odometer <= previous) {
+      throw new ConvexError(
+        "Odometer reading must be higher than the last reading",
+      );
+    }
+
+    let original = fill.original;
+    if (!original) {
+      const sourceBus =
+        fill.busId === bus._id ? bus : await ctx.db.get("buses", fill.busId);
+      if (!sourceBus) {
+        throw new ConvexError("Bus not found");
+      }
+      const sourcePurchases =
+        fill.busId === bus._id
+          ? purchases
+          : await purchasesForBus(ctx, fill.busId);
+      original = {
+        busId: fill.busId,
+        date: fill.date,
+        odometer: fill.odometer,
+        liters: fill.liters,
+        price: fill.price,
+        previousOdometer: readingBefore(
+          sourceBus.startingOdometer,
+          sourcePurchases,
+          fill.odometer,
+          fill._id,
+        ),
+      };
+    }
+
+    await ctx.db.patch("fuelPurchases", fill._id, {
+      busId: bus._id,
+      date: args.date,
+      odometer: args.odometer,
+      liters: args.liters,
+      price: args.price,
+      original,
+    });
+    await syncBusOdometer(ctx, fill.busId);
+    if (fill.busId !== bus._id) {
+      await syncBusOdometer(ctx, bus._id);
+    }
     return null;
   },
 });

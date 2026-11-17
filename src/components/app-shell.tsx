@@ -15,6 +15,7 @@ import {
   CalendarDays,
   CalendarRange,
   CalendarOff,
+  BookOpenCheck,
   ChevronDown,
   ClipboardCheck,
   ClipboardList,
@@ -31,6 +32,7 @@ import {
   Package,
   PencilLine,
   Plus,
+  Landmark,
   Receipt,
   School,
   ScrollText,
@@ -142,6 +144,12 @@ const NAV_GROUPS = [
         icon: FileText,
         roles: ["super_admin", "teacher"],
       },
+      {
+        href: "/monthly-tests",
+        label: "Monthly tests",
+        icon: BookOpenCheck,
+        roles: ["super_admin", "teacher"],
+      },
     ],
   },
   {
@@ -182,6 +190,12 @@ const NAV_GROUPS = [
         href: "/expenses",
         label: "Expenses",
         icon: Wallet,
+        roles: ["super_admin"],
+      },
+      {
+        href: "/cash-flow",
+        label: "Cash flow",
+        icon: Landmark,
         roles: ["super_admin"],
       },
     ],
@@ -856,7 +870,7 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
         />
         <div className="min-w-0">
           <p className="text-sm font-semibold tracking-wide">Shaheen Academy</p>
-          <p className="text-xs text-sidebar-primary">Champawat</p>
+          <p className="text-xs text-sidebar-primary">Champaran</p>
         </div>
       </div>
       <div className="sidebar-nav-scroll mt-5 min-h-0 flex-1 overflow-y-auto">

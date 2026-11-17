@@ -524,6 +524,14 @@ export const deleteTeacher = mutation({
       await ctx.db.delete("authSessions", session._id);
     }
 
+    const salaries = await ctx.db
+      .query("staffSalaries")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .take(200);
+    for (const salary of salaries) {
+      await ctx.db.delete("staffSalaries", salary._id);
+    }
+
     await ctx.db.delete("users", args.userId);
     return null;
   },

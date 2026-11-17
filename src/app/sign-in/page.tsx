@@ -67,7 +67,7 @@ export default function SignInPage() {
           <h1 className="mt-8 text-3xl font-semibold tracking-tight">
             Shaheen Academy
           </h1>
-          <p className="mt-2 text-sidebar-primary">Champawat</p>
+          <p className="mt-2 text-sidebar-primary">Champaran</p>
         </div>
         <p className="max-w-sm text-sm text-sidebar-foreground/75">
           Admissions, attendance, timetable, and fees for the school office.

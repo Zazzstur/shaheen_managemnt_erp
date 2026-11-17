@@ -763,12 +763,91 @@ const printLineValidator = v.object({
   subjectName: v.string(),
   total: printCellValidator,
   maxMarks: v.number(),
+  detail: v.optional(v.string()),
 });
+
+const printCategoryValidator = v.union(
+  v.literal("class_test_1"),
+  v.literal("half_yearly"),
+  v.literal("class_test_2"),
+  v.literal("annuals"),
+);
+
+const printViews = {
+  class_test_1: {
+    title: "Periodic test 1",
+    parts: ["class_test_1"],
+  },
+  half_yearly: {
+    title: "Half yearly",
+    parts: ["written_1", "notebook_1", "enrichment_1"],
+  },
+  class_test_2: {
+    title: "Periodic test 2",
+    parts: ["class_test_2"],
+  },
+  annuals: {
+    title: "Annuals",
+    parts: ["written_2", "notebook_2", "enrichment_2"],
+  },
+} as const satisfies Record<string, { title: string; parts: readonly CategoryId[] }>;
+
+const bundlePartLabel: Partial<Record<CategoryId, string>> = {
+  written_1: "Written",
+  notebook_1: "Notebook",
+  enrichment_1: "Subject enrichment",
+  written_2: "Written",
+  notebook_2: "Notebook",
+  enrichment_2: "Subject enrichment",
+};
+
+function formatBundleNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function combineBundle(
+  parts: Array<{ label: string; total: number | "AB" | null; maxMarks: number }>,
+): { total: number | "AB"; maxMarks: number; detail?: string } | null {
+  const present = parts.filter(
+    (part): part is { label: string; total: number | "AB"; maxMarks: number } =>
+      part.total !== null,
+  );
+  if (present.length === 0) {
+    return null;
+  }
+  const scored = present.filter(
+    (part): part is { label: string; total: number; maxMarks: number } =>
+      typeof part.total === "number",
+  );
+  const detail =
+    present.length > 1
+      ? present
+          .map(
+            (part) =>
+              `${part.label} ${
+                part.total === "AB" ? "AB" : formatBundleNumber(part.total)
+              }`,
+          )
+          .join(" · ")
+      : undefined;
+  if (scored.length === 0) {
+    return {
+      total: "AB",
+      maxMarks: present.reduce((sum, part) => sum + part.maxMarks, 0),
+      detail,
+    };
+  }
+  return {
+    total: scored.reduce((sum, part) => sum + part.total, 0),
+    maxMarks: scored.reduce((sum, part) => sum + part.maxMarks, 0),
+    detail,
+  };
+}
 
 export const printableReport = query({
   args: {
     classId: v.id("classes"),
-    category: reportCategoryValidator,
+    category: printCategoryValidator,
   },
   returns: v.object({
     classLabel: v.string(),
@@ -792,8 +871,7 @@ export const printableReport = query({
     if (!classroom) {
       throw new Error("Class not found");
     }
-    const meta = categoryMeta[args.category];
-    const legacy = legacyRead[args.category];
+    const view = printViews[args.category];
     const exams = await ctx.db
       .query("exams")
       .withIndex("by_class", (q) => q.eq("classId", args.classId))
@@ -819,26 +897,6 @@ export const printableReport = query({
         }
       }
       return bySubject;
-    }
-
-    const categoryExamBySubject = examsBySubject(meta);
-    const legacyExamBySubject = legacy
-      ? examsBySubject(legacyTermMeta[legacy.term])
-      : new Map<
-          (typeof exams)[number]["subjectId"],
-          (typeof exams)[number]
-        >();
-
-    const subjectIds = [
-      ...new Set([
-        ...categoryExamBySubject.keys(),
-        ...legacyExamBySubject.keys(),
-      ]),
-    ];
-    const subjectNames = new Map<string, string>();
-    for (const subjectId of subjectIds) {
-      const subject = await ctx.db.get("subjects", subjectId);
-      subjectNames.set(subjectId, subject?.name ?? "Unknown subject");
     }
 
     async function marksFor(examId: (typeof exams)[number]["_id"] | undefined) {
@@ -868,8 +926,50 @@ export const printableReport = query({
       return result;
     }
 
-    const categoryMarks = await marksBySubject(categoryExamBySubject);
-    const legacyMarks = await marksBySubject(legacyExamBySubject);
+    const dedicatedExam = new Map<CategoryId, ReturnType<typeof examsBySubject>>();
+    const dedicatedMarks = new Map<
+      CategoryId,
+      Awaited<ReturnType<typeof marksBySubject>>
+    >();
+    for (const part of view.parts) {
+      const examMap = examsBySubject(categoryMeta[part]);
+      dedicatedExam.set(part, examMap);
+      dedicatedMarks.set(part, await marksBySubject(examMap));
+    }
+
+    const legacyTerms = [
+      ...new Set(
+        view.parts.flatMap((part) => {
+          const source = legacyRead[part];
+          return source ? [source.term] : [];
+        }),
+      ),
+    ];
+    const legacyExam = new Map<
+      keyof typeof legacyTermMeta,
+      ReturnType<typeof examsBySubject>
+    >();
+    const legacyMarks = new Map<
+      keyof typeof legacyTermMeta,
+      Awaited<ReturnType<typeof marksBySubject>>
+    >();
+    for (const term of legacyTerms) {
+      const examMap = examsBySubject(legacyTermMeta[term]);
+      legacyExam.set(term, examMap);
+      legacyMarks.set(term, await marksBySubject(examMap));
+    }
+
+    const subjectIds = [
+      ...new Set([
+        ...view.parts.flatMap((part) => [...(dedicatedExam.get(part)?.keys() ?? [])]),
+        ...legacyTerms.flatMap((term) => [...(legacyExam.get(term)?.keys() ?? [])]),
+      ]),
+    ];
+    const subjectNames = new Map<string, string>();
+    for (const subjectId of subjectIds) {
+      const subject = await ctx.db.get("subjects", subjectId);
+      subjectNames.set(subjectId, subject?.name ?? "Unknown subject");
+    }
 
     const students = await ctx.db
       .query("students")
@@ -882,21 +982,32 @@ export const printableReport = query({
       }
       const lines = [];
       for (const subjectId of subjectIds) {
-        const mark = categoryMarks.get(subjectId)?.get(student._id);
-        const legacyRow = legacyMarks.get(subjectId)?.get(student._id);
-        const total = resolveSeparate(
-          categoryExamBySubject.has(subjectId),
-          mark?.marksObtained,
-          legacy ? legacyPart(legacyRow, legacy.part) : undefined,
-        );
-        if (total === null) {
+        const partCells = view.parts.map((part) => {
+          const source = legacyRead[part];
+          const legacyRow = source
+            ? legacyMarks.get(source.term)?.get(subjectId)?.get(student._id)
+            : undefined;
+          return {
+            label: bundlePartLabel[part] ?? categoryMeta[part].title,
+            total: resolveSeparate(
+              dedicatedExam.get(part)?.has(subjectId) ?? false,
+              dedicatedMarks.get(part)?.get(subjectId)?.get(student._id)
+                ?.marksObtained,
+              source ? legacyPart(legacyRow, source.part) : undefined,
+            ),
+            maxMarks: categoryMeta[part].maxMarks,
+          };
+        });
+        const combined = combineBundle(partCells);
+        if (!combined) {
           continue;
         }
         lines.push({
           subjectId,
           subjectName: subjectNames.get(subjectId) ?? "Unknown subject",
-          total,
-          maxMarks: meta.maxMarks,
+          total: combined.total,
+          maxMarks: combined.maxMarks,
+          ...(combined.detail ? { detail: combined.detail } : {}),
         });
       }
       lines.sort((a, b) => a.subjectName.localeCompare(b.subjectName));
@@ -924,7 +1035,7 @@ export const printableReport = query({
     rows.sort((a, b) => a.studentName.localeCompare(b.studentName));
     return {
       classLabel: `${classroom.name} ${classroom.section}`.trim(),
-      categoryTitle: meta.title,
+      categoryTitle: view.title,
       students: rows,
     };
   },

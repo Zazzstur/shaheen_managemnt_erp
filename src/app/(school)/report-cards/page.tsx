@@ -59,12 +59,24 @@ const CATEGORIES = [
   { id: "written_2", label: "Written 2 — 80", max: 80 },
 ] as const;
 
+const PRINT_CATEGORIES = [
+  { id: "class_test_1", label: "Periodic test 1" },
+  { id: "half_yearly", label: "Half yearly" },
+  { id: "class_test_2", label: "Periodic test 2" },
+  { id: "annuals", label: "Annuals" },
+] as const;
+
 type ReportCategory = (typeof CATEGORIES)[number]["id"];
+type PrintCategory = (typeof PRINT_CATEGORIES)[number]["id"];
 type CategorySheet = FunctionReturnType<typeof api.reportCards.categorySheet>;
 type SheetStudent = CategorySheet["students"][number];
 
 function isReportCategory(value: string | null): value is ReportCategory {
   return CATEGORIES.some((item) => item.id === value);
+}
+
+function isPrintCategory(value: string | null): value is PrintCategory {
+  return PRINT_CATEGORIES.some((item) => item.id === value);
 }
 
 function simpleMark(student: SheetStudent, category: ReportCategory) {
@@ -591,7 +603,12 @@ function ReportCardSheet({
                         {line.subjectName}
                       </TableCell>
                       <TableCell className={MARK_FIGURE}>
-                        {printMark(line.total)}
+                        <span className="block">{printMark(line.total)}</span>
+                        {line.detail ? (
+                          <span className="mt-0.5 block text-[9px] leading-tight font-semibold">
+                            {line.detail}
+                          </span>
+                        ) : null}
                       </TableCell>
                       <TableCell className={MARK_FIGURE}>{line.maxMarks}</TableCell>
                       <TableCell className={MARK_FIGURE}>
@@ -677,9 +694,9 @@ export default function ReportCardsPage() {
   const me = useQuery(api.users.me);
   const classes = useQuery(api.catalog.listClasses);
   const [classId, setClassId] = useState<Id<"classes"> | "">("");
-  const [category, setCategory] = useState<ReportCategory | "">("");
+  const [category, setCategory] = useState<PrintCategory | "">("");
   const [studentId, setStudentId] = useState<Id<"students"> | "">("");
-  const selectedCategory = CATEGORIES.find((item) => item.id === category);
+  const selectedCategory = PRINT_CATEGORIES.find((item) => item.id === category);
   const report = useQuery(
     api.reportCards.printableReport,
     classId && category ? { classId, category } : "skip",
@@ -853,10 +870,10 @@ export default function ReportCardsPage() {
             <Select
               value={category || null}
               items={Object.fromEntries(
-                CATEGORIES.map((item) => [item.id, item.label]),
+                PRINT_CATEGORIES.map((item) => [item.id, item.label]),
               )}
               onValueChange={(value) => {
-                if (isReportCategory(value)) {
+                if (isPrintCategory(value)) {
                   setCategory(value);
                   setStudentId("");
                 }
@@ -868,7 +885,7 @@ export default function ReportCardsPage() {
                 </span>
               </SelectTrigger>
               <SelectContent>
-                {CATEGORIES.map((item) => (
+                {PRINT_CATEGORIES.map((item) => (
                   <SelectItem key={item.id} value={item.id}>
                     {item.label}
                   </SelectItem>

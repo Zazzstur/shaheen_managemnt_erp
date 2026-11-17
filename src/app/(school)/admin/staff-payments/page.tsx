@@ -41,6 +41,7 @@ type StaffPayRow = {
   roleLabel: string;
   monthlySalary?: number;
   joiningDate?: string;
+  monthSalaries: { month: string; salary: number }[];
   paid: number;
   due?: number;
   payments: Payment[];
@@ -98,52 +99,39 @@ type SalaryMonth = {
   status: "Paid" | "Due";
 };
 
-function salaryDistribution(row: StaffPayRow, asOf: string): {
+function salaryDistribution(row: StaffPayRow): {
   months: SalaryMonth[];
   advance: number;
 } {
   if (row.monthlySalary === undefined || !row.joiningDate) {
     return { months: [], advance: 0 };
   }
-  if (row.joiningDate.slice(0, 7) > asOf.slice(0, 7)) {
+  if (row.monthSalaries.length === 0) {
     return { months: [], advance: row.paid };
   }
-  const salaryCents = cents(row.monthlySalary);
   let pool = cents(row.paid);
-  const months: SalaryMonth[] = [];
-  let year = Number(row.joiningDate.slice(0, 4));
-  let month = Number(row.joiningDate.slice(5, 7));
-  const endYear = Number(asOf.slice(0, 4));
-  const endMonth = Number(asOf.slice(5, 7));
-  while (year < endYear || (year === endYear && month <= endMonth)) {
-    const key = `${year}-${String(month).padStart(2, "0")}`;
+  const months: SalaryMonth[] = row.monthSalaries.map((line) => {
+    const salaryCents = cents(line.salary);
     const appliedCents = Math.min(salaryCents, pool);
     pool -= appliedCents;
     const leftCents = salaryCents - appliedCents;
-    months.push({
-      month: key,
-      label: monthLabel(key),
+    return {
+      month: line.month,
+      label: monthLabel(line.month),
       salary: salaryCents / 100,
       applied: appliedCents / 100,
       left: leftCents / 100,
       status: leftCents === 0 ? "Paid" : "Due",
-    });
-    month += 1;
-    if (month > 12) {
-      month = 1;
-      year += 1;
-    }
-  }
+    };
+  });
   return { months, advance: pool / 100 };
 }
 
 function PayDetail({
   row,
-  asOf,
   readOnly = false,
 }: {
   row: StaffPayRow;
-  asOf: string;
   readOnly?: boolean;
 }) {
   const record = useMutation(api.staff.recordPayment);
@@ -153,7 +141,10 @@ function PayDetail({
   const [mode, setMode] = useState<PaymentMode>("cash");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
-  const distribution = salaryDistribution(row, asOf);
+  const distribution = salaryDistribution(row);
+  const monthsDue = distribution.months.filter(
+    (line) => line.left > 0 || line.status === "Due",
+  );
 
   async function onRecord() {
     const value = Number(amount);
@@ -225,6 +216,8 @@ function PayDetail({
         ) : null}
         {distribution.months.length === 0 ? (
           <p className="text-sm text-muted-foreground">No months to charge.</p>
+        ) : monthsDue.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No salary is due.</p>
         ) : (
           <>
             <div className="hidden sm:block">
@@ -239,7 +232,7 @@ function PayDetail({
                   </tr>
                 </thead>
                 <tbody>
-                  {distribution.months.map((line) => (
+                  {monthsDue.map((line) => (
                     <tr key={line.month} className="border-b last:border-0">
                       <td className="py-2 pr-3">{line.label}</td>
                       <td className="py-2 pr-3 tabular-nums">{money(line.salary)}</td>
@@ -252,7 +245,7 @@ function PayDetail({
               </table>
             </div>
             <div className="divide-y rounded-lg border sm:hidden">
-              {distribution.months.map((line) => (
+              {monthsDue.map((line) => (
                 <div key={line.month} className="space-y-2 px-3 py-2 text-sm">
                   <div className="flex items-start justify-between gap-3">
                     <p className="font-medium">{line.label}</p>
@@ -365,11 +358,9 @@ function PayDetail({
 
 function PaymentRoster({
   rows,
-  asOf,
   readOnly = false,
 }: {
   rows: StaffPayRow[];
-  asOf: string;
   readOnly?: boolean;
 }) {
   const [search, setSearch] = useState("");
@@ -455,7 +446,6 @@ function PaymentRoster({
                     key={`${row.userId}:${row.paid}:${row.due ?? ""}:${row.payments.length}`}
                     readOnly={readOnly}
                     row={row}
-                    asOf={asOf}
                   />
                 ) : null}
               </div>
@@ -493,7 +483,7 @@ export default function StaffPaymentsPage() {
           Only super admins and data entry can record staff payments.
         </p>
       ) : rows ? (
-        <PaymentRoster rows={rows} asOf={asOf} readOnly={!canEdit} />
+        <PaymentRoster rows={rows} readOnly={!canEdit} />
       ) : null}
     </div>
   );

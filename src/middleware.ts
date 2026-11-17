@@ -14,11 +14,13 @@ const isProtectedRoute = createRouteMatcher([
   "/transport(.*)",
   "/students(.*)",
   "/report-cards(.*)",
+  "/monthly-tests(.*)",
   "/homework(.*)",
   "/classwork(.*)",
   "/assignment(.*)",
   "/stock(.*)",
   "/expenses(.*)",
+  "/cash-flow(.*)",
 ]);
 
 export default convexAuthNextjsMiddleware(async (request, { convexAuth }) => {

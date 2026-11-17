@@ -7,7 +7,16 @@ import { Id } from "@convex/_generated/dataModel";
 import { toast } from "sonner";
 import { canViewSchoolAdmin, isSchoolAdmin } from "@/lib/access";
 import { mutationResult } from "@/lib/result";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -61,6 +70,43 @@ function parseNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
 
+function formatMileage(value: number | null) {
+  return value === null ? "—" : `${value.toFixed(2)} km/L`;
+}
+
+function previewMileage(
+  bus: {
+    startingOdometer: number;
+    readings: { fillId: string; odometer: number }[];
+  },
+  fillId: string,
+  odometer: number,
+  liters: number,
+) {
+  const earlier = bus.readings.filter(
+    (row) => row.fillId !== fillId && row.odometer < odometer,
+  );
+  const previous =
+    earlier.length > 0
+      ? Math.max(...earlier.map((row) => row.odometer))
+      : bus.startingOdometer;
+  const distance = Math.round((odometer - previous) * 10) / 10;
+  if (distance <= 0 || liters <= 0) {
+    return null;
+  }
+  return Math.round((distance / liters) * 100) / 100;
+}
+
+type OriginalFill = {
+  busName: string;
+  busNumber: string;
+  date: string;
+  odometer: number;
+  liters: number;
+  price: number;
+  mileage: number | null;
+};
+
 export default function FuelPage() {
   const me = useQuery(api.users.me);
   const [month, setMonth] = useState(() => todayIso().slice(0, 7));
@@ -72,6 +118,7 @@ export default function FuelPage() {
   );
   const addBus = useMutation(api.fuel.addBus);
   const recordFuel = useMutation(api.fuel.recordFuel);
+  const updateFuel = useMutation(api.fuel.updateFuel);
 
   const [busName, setBusName] = useState("");
   const [busNumber, setBusNumber] = useState("");
@@ -84,6 +131,29 @@ export default function FuelPage() {
   const [liters, setLiters] = useState("");
   const [price, setPrice] = useState("");
   const [savingFuel, setSavingFuel] = useState(false);
+  const [editing, setEditing] = useState<{
+    fillId: Id<"fuelPurchases">;
+    busId: string;
+    date: string;
+    odometer: string;
+    liters: string;
+    price: string;
+  } | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [originalFill, setOriginalFill] = useState<OriginalFill | null>(null);
+
+  const editMileage = useMemo(() => {
+    if (!editing) {
+      return null;
+    }
+    const bus = (overview?.buses ?? []).find((row) => row.busId === editing.busId);
+    const reading = parseNumber(editing.odometer);
+    const fuel = parseNumber(editing.liters);
+    if (!bus || !Number.isFinite(reading) || !Number.isFinite(fuel)) {
+      return null;
+    }
+    return previewMileage(bus, editing.fillId, reading, fuel);
+  }, [editing, overview?.buses]);
 
   const busItems = useMemo(() => {
     const items: Record<string, string> = {};
@@ -152,6 +222,45 @@ export default function FuelPage() {
       toast.error(mutationResult(error).message);
     } finally {
       setSavingFuel(false);
+    }
+  }
+
+  async function onSaveEdit() {
+    if (!editing) {
+      return;
+    }
+    const reading = parseNumber(editing.odometer);
+    const fuel = parseNumber(editing.liters);
+    const amount = parseNumber(editing.price);
+    if (!editing.busId) {
+      toast.error("Select a bus");
+      return;
+    }
+    if (
+      !editing.date ||
+      !Number.isFinite(reading) ||
+      !Number.isFinite(fuel) ||
+      !Number.isFinite(amount)
+    ) {
+      toast.error("Enter the odometer, litres, and price");
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await updateFuel({
+        fillId: editing.fillId,
+        busId: editing.busId as Id<"buses">,
+        date: editing.date,
+        odometer: reading,
+        liters: fuel,
+        price: amount,
+      });
+      toast.success("Fuel updated");
+      setEditing(null);
+    } catch (error) {
+      toast.error(mutationResult(error).message);
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -428,12 +537,20 @@ export default function FuelPage() {
                   <TableHead>Litres</TableHead>
                   <TableHead>Price</TableHead>
                   <TableHead>Mileage</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {overview.fills.map((fill) => (
                   <TableRow key={fill.fillId}>
-                    <TableCell>{formatDay(fill.date)}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span>{formatDay(fill.date)}</span>
+                        {fill.edited ? (
+                          <Badge variant="secondary">Edited</Badge>
+                        ) : null}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <div className="font-medium">{fill.busName}</div>
                       <div className="text-xs text-muted-foreground">
@@ -443,10 +560,39 @@ export default function FuelPage() {
                     <TableCell>{fill.odometer.toLocaleString("en-IN")} km</TableCell>
                     <TableCell>{fill.liters}</TableCell>
                     <TableCell>{money(fill.price)}</TableCell>
+                    <TableCell>{formatMileage(fill.mileage)}</TableCell>
                     <TableCell>
-                      {fill.mileage === null
-                        ? "—"
-                        : `${fill.mileage.toFixed(2)} km/L`}
+                      <div className="flex justify-end gap-2">
+                        {canEdit ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              setEditing({
+                                fillId: fill.fillId,
+                                busId: fill.busId,
+                                date: fill.date,
+                                odometer: String(fill.odometer),
+                                liters: String(fill.liters),
+                                price: String(fill.price),
+                              })
+                            }
+                          >
+                            Edit
+                          </Button>
+                        ) : null}
+                        {fill.original ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setOriginalFill(fill.original)}
+                          >
+                            Original
+                          </Button>
+                        ) : null}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -455,6 +601,185 @@ export default function FuelPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={editing !== null}
+        onOpenChange={(next) => {
+          if (!next && !savingEdit) {
+            setEditing(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit fuel fill</DialogTitle>
+            <DialogDescription>
+              Mileage is the kilometres since the previous reading, divided by
+              the litres filled.
+            </DialogDescription>
+          </DialogHeader>
+          {editing ? (
+            <div className="grid gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-fuel-bus">Bus</Label>
+                <Select
+                  value={editing.busId}
+                  items={busItems}
+                  onValueChange={(next) => {
+                    if (next) {
+                      setEditing((current) =>
+                        current ? { ...current, busId: next } : current,
+                      );
+                    }
+                  }}
+                >
+                  <SelectTrigger id="edit-fuel-bus" className="w-full">
+                    <SelectValue placeholder="Select a bus" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(overview?.buses ?? []).map((bus) => (
+                      <SelectItem key={bus.busId} value={bus.busId}>
+                        {bus.name} · {bus.number}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-fuel-date">Date</Label>
+                <Input
+                  id="edit-fuel-date"
+                  type="date"
+                  value={editing.date}
+                  max={todayIso()}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    if (next) {
+                      setEditing((current) =>
+                        current ? { ...current, date: next } : current,
+                      );
+                    }
+                  }}
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-fuel-odometer">Odometer</Label>
+                  <Input
+                    id="edit-fuel-odometer"
+                    inputMode="decimal"
+                    value={editing.odometer}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      setEditing((current) =>
+                        current ? { ...current, odometer: next } : current,
+                      );
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-fuel-liters">Litres</Label>
+                  <Input
+                    id="edit-fuel-liters"
+                    inputMode="decimal"
+                    value={editing.liters}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      setEditing((current) =>
+                        current ? { ...current, liters: next } : current,
+                      );
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-fuel-price">Price (₹)</Label>
+                  <Input
+                    id="edit-fuel-price"
+                    inputMode="decimal"
+                    value={editing.price}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      setEditing((current) =>
+                        current ? { ...current, price: next } : current,
+                      );
+                    }}
+                  />
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Mileage: {formatMileage(editMileage)}
+              </p>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={savingEdit}
+              onClick={() => setEditing(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={savingEdit}
+              onClick={() => void onSaveEdit()}
+            >
+              {savingEdit ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={originalFill !== null}
+        onOpenChange={(next) => {
+          if (!next) {
+            setOriginalFill(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Original entry</DialogTitle>
+            <DialogDescription>
+              Values from the first time this fill was saved.
+            </DialogDescription>
+          </DialogHeader>
+          {originalFill ? (
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <dt className="text-muted-foreground">Date</dt>
+                <dd>{formatDay(originalFill.date)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Bus</dt>
+                <dd>
+                  {originalFill.busName}
+                  {originalFill.busNumber ? ` · ${originalFill.busNumber}` : ""}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Odometer</dt>
+                <dd>{originalFill.odometer.toLocaleString("en-IN")} km</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Litres</dt>
+                <dd>{originalFill.liters}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Price</dt>
+                <dd>{money(originalFill.price)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Mileage</dt>
+                <dd>{formatMileage(originalFill.mileage)}</dd>
+              </div>
+            </dl>
+          ) : null}
+          <DialogFooter showCloseButton />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

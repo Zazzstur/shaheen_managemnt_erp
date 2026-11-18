@@ -13,6 +13,7 @@ type StarRule = {
 const STAR_RULES: readonly StarRule[] = [
   { path: "/admin/students", roles: ["super_admin"] },
   { path: "/students", roles: ["super_admin", "teacher"] },
+  { path: "/students/attendance", roles: ["super_admin"] },
   { path: "/students/class-change", roles: ["super_admin"] },
   { path: "/students/transfer-certificate", roles: ["super_admin"] },
   { path: "/classes", roles: ["super_admin"] },
@@ -84,11 +85,31 @@ function navRole(user: { role: string; staffRole?: string }) {
   return user.staffRole === "data_entry" ? "super_admin" : user.role;
 }
 
+const OFFICE_PREFIXES = [
+  "/transport",
+  "/fuel",
+  "/admin/users",
+  "/admin/staff",
+  "/admin/fees",
+  "/stock",
+  "/expenses",
+  "/cash-flow",
+];
+
+function isOfficePath(path: string) {
+  return OFFICE_PREFIXES.some(
+    (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+  );
+}
+
 function canOpen(
   rule: StarRule,
   role: string,
   staffRole: string | undefined,
 ) {
+  if (staffRole === "data_entry" && isOfficePath(rule.path)) {
+    return false;
+  }
   if (staffRole === "observer") {
     return rule.roles.includes("super_admin");
   }

@@ -9,6 +9,7 @@ import { domToBlob } from "modern-screenshot";
 import { toast } from "sonner";
 import { mutationResult } from "@/lib/result";
 import { canViewSchoolAdmin } from "@/lib/access";
+import { TintedName } from "@/components/tinted-name";
 import { downloadCsv } from "@/lib/downloadCsv";
 import {
   downloadBlob,
@@ -169,6 +170,7 @@ type Statement = {
   admissionNumber: string;
   fatherName?: string;
   classLabel: string;
+  classColor?: string;
   year: string;
   academicEarlierPayments: number;
   academic: Account;
@@ -206,6 +208,7 @@ type StudentHit = {
   studentName: string;
   admissionNumber: string;
   classLabel: string;
+  classColor?: string;
   totalDue?: number;
 };
 
@@ -1158,7 +1161,10 @@ function StatementView({
     <div className="space-y-4">
       <div>
         <h2 className="text-lg font-medium">
-          {statement.studentName}{" "}
+          <TintedName
+            name={statement.studentName}
+            color={statement.classColor}
+          />{" "}
           <span className="text-muted-foreground">
             {statement.admissionNumber}
           </span>
@@ -1571,7 +1577,10 @@ export default function FeesPage() {
                   setOpenHit({ hit: match, index });
                 }}
               >
-                <span className="font-medium">{match.studentName}</span>
+                <TintedName
+                  name={match.studentName}
+                  color={match.classColor}
+                />
                 <span className="text-muted-foreground">
                   {" "}
                   · {match.admissionNumber} · {match.classLabel}

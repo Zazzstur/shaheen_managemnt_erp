@@ -119,6 +119,7 @@ export const classDocValidator = v.object({
   tuitionCycle: v.optional(tuitionCycleValidator),
   baseTuitionFee: v.optional(v.number()),
   extraFees: v.optional(v.array(extraFeeValidator)),
+  color: v.optional(v.string()),
 });
 
 export const classAdminRowValidator = v.object({
@@ -132,6 +133,7 @@ export const classAdminRowValidator = v.object({
   extraFees: v.array(extraFeeValidator),
   enrolledCount: v.number(),
   totalClassFee: v.number(),
+  color: v.optional(v.string()),
 });
 
 export const subjectDocValidator = v.object({

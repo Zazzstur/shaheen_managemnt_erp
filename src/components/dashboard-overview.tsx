@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import {
   Card,
@@ -10,16 +12,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-
-const RANGES = [
-  { id: "today", label: "Today" },
-  { id: "week", label: "Week" },
-  { id: "month", label: "Month" },
-  { id: "half", label: "6 months" },
-] as const;
-
-type RangeId = (typeof RANGES)[number]["id"];
 
 function isoDate(date: Date) {
   const year = date.getFullYear();
@@ -28,18 +26,258 @@ function isoDate(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function rangeFor(preset: RangeId) {
-  const end = new Date();
-  const start = new Date(end);
-  if (preset === "week") {
-    start.setDate(end.getDate() - 6);
-  } else if (preset === "month") {
-    start.setDate(end.getDate() - 29);
-  } else if (preset === "half") {
-    start.setDate(end.getDate() - 182);
-  }
-  return { from: isoDate(start), to: isoDate(end) };
+type PeriodMode = "month" | "range";
+
+type Period = {
+  mode: PeriodMode;
+  month: string;
+  from: string;
+  to: string;
+};
+
+function currentMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
+
+function defaultPeriod(): Period {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  return {
+    mode: "month",
+    month: currentMonth(),
+    from: isoDate(start),
+    to: isoDate(now),
+  };
+}
+
+function monthBounds(month: string) {
+  const [year, part] = month.split("-").map(Number);
+  const last = new Date(year, part, 0).getDate();
+  return {
+    from: `${month}-01`,
+    to: `${month}-${String(last).padStart(2, "0")}`,
+  };
+}
+
+function periodBounds(period: Period) {
+  if (period.mode === "month") {
+    return monthBounds(period.month);
+  }
+  if (period.from > period.to) {
+    return { from: period.to, to: period.from };
+  }
+  return { from: period.from, to: period.to };
+}
+
+function dayCount(from: string, to: string) {
+  const start = new Date(`${from}T00:00:00Z`).getTime();
+  const end = new Date(`${to}T00:00:00Z`).getTime();
+  return Math.floor((end - start) / 86_400_000) + 1;
+}
+
+const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
+
+function RangeCalendar({
+  from,
+  to,
+  start,
+  onStart,
+  onComplete,
+}: {
+  from: string;
+  to: string;
+  start: string | null;
+  onStart: (day: string) => void;
+  onComplete: (from: string, to: string) => void;
+}) {
+  const [view, setView] = useState(() => (start ?? from).slice(0, 7));
+  const [hover, setHover] = useState<string | null>(null);
+  const [year, month] = view.split("-").map(Number);
+  const firstWeekday = new Date(year, month - 1, 1).getDay();
+  const count = new Date(year, month, 0).getDate();
+  const today = isoDate(new Date());
+  const rangeStart = start ?? from;
+  const rangeEnd = start ? (hover ?? start) : to;
+  const low = rangeStart < rangeEnd ? rangeStart : rangeEnd;
+  const high = rangeStart < rangeEnd ? rangeEnd : rangeStart;
+  const label = new Date(year, month - 1, 1).toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+  });
+
+  function shift(delta: number) {
+    const next = new Date(year, month - 1 + delta, 1);
+    setView(
+      `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`,
+    );
+  }
+
+  function pick(day: string) {
+    if (!start) {
+      onStart(day);
+      return;
+    }
+    onComplete(start <= day ? start : day, start <= day ? day : start);
+  }
+
+  return (
+    <div className="w-[16.5rem]">
+      <div className="mb-2 flex items-center justify-between">
+        <button
+          type="button"
+          aria-label="Previous month"
+          className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          onClick={() => shift(-1)}
+        >
+          <ChevronLeft className="size-4" />
+        </button>
+        <span className="text-xs font-medium">{label}</span>
+        <button
+          type="button"
+          aria-label="Next month"
+          className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          onClick={() => shift(1)}
+        >
+          <ChevronRight className="size-4" />
+        </button>
+      </div>
+      <p className="mb-2 text-xs text-muted-foreground">
+        {start ? "Select an end date" : "Select a start date"}
+      </p>
+      <div className="grid grid-cols-7 text-center">
+        {WEEKDAYS.map((day, index) => (
+          <span
+            key={`${day}-${index}`}
+            className="py-1 text-[10px] font-medium text-muted-foreground"
+          >
+            {day}
+          </span>
+        ))}
+        {Array.from({ length: firstWeekday }, (_, index) => (
+          <span key={`pad-${index}`} />
+        ))}
+        {Array.from({ length: count }, (_, index) => {
+          const day = `${view}-${String(index + 1).padStart(2, "0")}`;
+          const endpoint = day === low || day === high;
+          const inRange = day > low && day < high;
+          return (
+            <button
+              key={day}
+              type="button"
+              className={cn(
+                "mx-auto flex size-8 items-center justify-center rounded-md text-xs",
+                endpoint && "bg-foreground text-background",
+                inRange && "bg-muted",
+                !endpoint && "hover:bg-muted",
+                day === today && !endpoint && "ring-1 ring-foreground/25",
+              )}
+              onMouseEnter={() => setHover(day)}
+              onMouseLeave={() => setHover(null)}
+              onClick={() => pick(day)}
+            >
+              {index + 1}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PeriodControl({
+  period,
+  onChange,
+}: {
+  period: Period;
+  onChange: (period: Period) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [start, setStart] = useState<string | null>(null);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex rounded-md bg-muted p-0.5 text-xs">
+        {(
+          [
+            ["month", "Month"],
+            ["range", "Dates"],
+          ] as const
+        ).map(([mode, label]) => (
+          <button
+            key={mode}
+            type="button"
+            className={cn(
+              "rounded px-2 py-1 font-medium transition-colors",
+              period.mode === mode
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => {
+              if (mode === period.mode) {
+                if (mode === "range") setOpen(true);
+                return;
+              }
+              if (mode === "range") {
+                const bounds = monthBounds(period.month);
+                onChange({ ...period, mode, ...bounds });
+                setStart(null);
+                setOpen(true);
+                return;
+              }
+              setOpen(false);
+              onChange({ ...period, mode, month: period.from.slice(0, 7) });
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {period.mode === "month" ? (
+        <input
+          type="month"
+          aria-label="Month"
+          value={period.month}
+          onChange={(event) => {
+            if (event.target.value) {
+              onChange({ ...period, month: event.target.value });
+            }
+          }}
+          className="h-7 rounded-md border border-input bg-transparent px-2 text-xs outline-none"
+        />
+      ) : (
+        <Popover
+          open={open}
+          onOpenChange={(next) => {
+            setOpen(next);
+            if (next) setStart(null);
+          }}
+        >
+          <PopoverTrigger className="h-7 rounded-md border border-input bg-transparent px-2 text-xs outline-none">
+            {start
+              ? `${formatRange(start, start)} –`
+              : formatRange(period.from, period.to)}
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-3">
+            <RangeCalendar
+              from={period.from}
+              to={period.to}
+              start={start}
+              onStart={setStart}
+              onComplete={(from, to) => {
+                onChange({ ...period, from, to });
+                setStart(null);
+                setOpen(false);
+              }}
+            />
+          </PopoverContent>
+        </Popover>
+      )}
+    </div>
+  );
+}
+
+type Overview = FunctionReturnType<typeof api.dashboard.overview>;
 
 function money(value: number) {
   return value.toLocaleString(undefined, {
@@ -338,94 +576,6 @@ function Stat({
   );
 }
 
-function StackedColumns({
-  points,
-  series,
-  empty,
-}: {
-  points: Array<{
-    label: string;
-    present: number;
-    absent: number;
-    late: number;
-    academic: number;
-    transport: number;
-  }>;
-  series: Array<{
-    key: "present" | "absent" | "late" | "academic" | "transport";
-    className: string;
-  }>;
-  empty: string;
-}) {
-  const totals = points.map((point) =>
-    series.reduce((sum, item) => sum + point[item.key], 0),
-  );
-  const max = Math.max(1, ...totals);
-  const hasData = totals.some((total) => total > 0);
-  if (!hasData) {
-    return <p className="text-sm text-muted-foreground">{empty}</p>;
-  }
-  const labelStep = points.length > 16 ? 5 : points.length > 8 ? 2 : 1;
-
-  return (
-    <div>
-      <div className="flex h-44 items-end gap-1">
-        {points.map((point, index) => {
-          const total = totals[index] ?? 0;
-          const height = total === 0 ? 0 : Math.max(4, (total / max) * 100);
-          const parts = series
-            .map((item) => `${item.key} ${point[item.key]}`)
-            .join(", ");
-          return (
-            <div
-              key={`${point.label}-${index}`}
-              className="flex h-full min-w-0 flex-1 flex-col justify-end"
-              title={`${point.label}: ${parts}`}
-            >
-              <div
-                className="flex w-full flex-col overflow-hidden rounded-t-sm"
-                style={{ height: `${height}%` }}
-              >
-                {series.map((item) =>
-                  point[item.key] > 0 ? (
-                    <div
-                      key={item.key}
-                      className={cn("min-h-0", item.className)}
-                      style={{ flexGrow: point[item.key] }}
-                    />
-                  ) : null,
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div className="mt-2 flex gap-1">
-        {points.map((point, index) => (
-          <div
-            key={`${point.label}-label-${index}`}
-            className="min-w-0 flex-1 text-center text-[10px] text-muted-foreground"
-          >
-            {index % labelStep === 0 ? point.label.split("–")[0] : ""}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-const ATTENDANCE_LEGEND = [
-  { id: "present", label: "Present", swatch: "bg-chart-1" },
-  { id: "late", label: "Late", swatch: "bg-chart-2" },
-  { id: "absent", label: "Absent", swatch: "bg-chart-4" },
-] as const;
-
-const ATTENDANCE_STACK = [
-  { key: "absent", className: "bg-chart-4" },
-  { key: "late", className: "bg-chart-2" },
-  { key: "present", className: "bg-chart-1" },
-] as const;
-
 const FEE_LEGEND = [
   { id: "academic", label: "Academic", swatch: "bg-chart-3" },
   { id: "discount", label: "Discount", swatch: "bg-neutral-400" },
@@ -444,75 +594,211 @@ const EXPENSE_LEGEND = [
   { id: "other", label: "Other expenses", swatch: "bg-chart-5" },
 ] as const;
 
-type AttendanceSeriesId = (typeof ATTENDANCE_LEGEND)[number]["id"];
 type PaymentSeriesId = (typeof PAYMENT_LEGEND)[number]["id"];
 
-export function DashboardOverview() {
-  const [preset, setPreset] = useState<RangeId>("today");
-  const [attendanceSeries, setAttendanceSeries] =
-    useState<AttendanceSeriesId | null>(null);
+function FeeCollectionChart({ data }: { data: Overview }) {
   const [feeSeries, setFeeSeries] = useState<FeeSeriesId | null>(null);
+
+  return (
+    <Card className="bg-card shadow-sm xl:col-span-3">
+      <CardHeader>
+        <CardTitle>Fee collection</CardTitle>
+        <CardDescription>
+          {feeSeries === "academic"
+            ? `Showing academic fees${cadence(data.points.length)}. Total ${money(data.fees.academic)}.`
+            : feeSeries === "discount"
+              ? `Showing the academic discount${cadence(data.points.length)}. Total ${money(data.fees.academicDiscount)}.`
+              : feeSeries === "transport"
+                ? `Showing transport fees${cadence(data.points.length)}. Total ${money(data.fees.transport)}.`
+                : `Academic and transport side by side${cadence(data.points.length)}. The grey cap is the academic discount.`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <SeriesLegend
+          label="Fee series"
+          items={FEE_LEGEND}
+          value={feeSeries}
+          onChange={setFeeSeries}
+        />
+        <FeeColumns points={data.points} focus={feeSeries} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function FeePaymentChart({ data }: { data: Overview }) {
   const [paymentSeries, setPaymentSeries] = useState<PaymentSeriesId | null>(
     null,
   );
+  const rangeLabel = formatRange(data.from, data.to);
+
+  return (
+    <Card className="bg-card shadow-sm xl:col-span-2">
+      <CardHeader>
+        <CardTitle>How fees were paid</CardTitle>
+        <CardDescription>
+          {paymentSeries === "cash"
+            ? `Showing cash for ${rangeLabel}. Total ${money(data.fees.cash)}.`
+            : paymentSeries === "online"
+              ? `Showing online payments for ${rangeLabel}. Total ${money(data.fees.online)}.`
+              : `Cash and online totals for ${rangeLabel}.`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <>
+            <SeriesLegend
+              label="Payment modes"
+              items={PAYMENT_LEGEND}
+              value={paymentSeries}
+              onChange={setPaymentSeries}
+            />
+            {[
+              {
+                id: "cash" as const,
+                label: "Cash",
+                amount: data.fees.cash,
+                className: "bg-chart-2",
+              },
+              {
+                id: "online" as const,
+                label: "Online",
+                amount: data.fees.online,
+                className: "bg-chart-3",
+              },
+            ]
+              .filter((row) => !paymentSeries || row.id === paymentSeries)
+              .map((row) => {
+                const width =
+                  data.fees.collected === 0
+                    ? 0
+                    : Math.round((row.amount / data.fees.collected) * 100);
+                return (
+                  <div key={row.label} className="space-y-1">
+                    <div className="flex justify-between text-sm">
+                      <span>{row.label}</span>
+                      <span className="tabular-nums">{money(row.amount)}</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className={cn("h-full rounded-full", row.className)}
+                        style={{ width: `${width}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            {data.fees.collected - data.fees.cash - data.fees.online > 0.009 ? (
+              <p className="text-xs text-muted-foreground">
+                Some receipts have no payment mode recorded.
+              </p>
+            ) : null}
+        </>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ExpenseChart({ data }: { data: Overview }) {
   const [expenseSeries, setExpenseSeries] = useState<ExpenseSeriesId | null>(
     null,
   );
-  const { from, to } = useMemo(() => rangeFor(preset), [preset]);
-  const data = useQuery(api.dashboard.overview, { from, to });
-  const rangeLabel = RANGES.find((item) => item.id === preset)?.label ?? "Today";
+
+  return (
+    <Card className="bg-card shadow-sm">
+      <CardHeader>
+        <CardTitle>Expenses</CardTitle>
+        <CardDescription>
+          {expenseSeries
+            ? `Showing ${EXPENSE_BARS.find((item) => item.id === expenseSeries)?.label ?? "expenses"}${cadence(data.points.length)}. Total ${money(data.expenses[expenseSeries])}.`
+            : `Fuel, staff payments, stock, and other expenses${cadence(data.points.length)}. Total ${money(data.expenses.total)}.`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <SeriesLegend
+          label="Expense series"
+          items={EXPENSE_LEGEND}
+          value={expenseSeries}
+          onChange={setExpenseSeries}
+        />
+        <ExpenseColumns points={data.points} focus={expenseSeries} />
+      </CardContent>
+    </Card>
+  );
+}
+
+export function DashboardOverview() {
+  const [period, setPeriod] = useState(defaultPeriod);
+  const { from, to } = periodBounds(period);
+  const tooLong = dayCount(from, to) > 190;
+  const today = useMemo(() => isoDate(new Date()), []);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+  const me = useQuery(api.users.me);
+  const headcount = useQuery(
+    api.dashboard.todayHeadcount,
+    mounted && me?.role === "super_admin" ? { date: today } : "skip",
+  );
+  const data = useQuery(
+    api.dashboard.overview,
+    tooLong ? "skip" : { from, to },
+  );
 
   return (
     <section className="space-y-4">
+      {mounted && me?.role === "super_admin" ? (
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">
+              Today
+            </h2>
+            <p className="text-sm text-muted-foreground">{formatRange(today, today)}</p>
+          </div>
+          {headcount === undefined ? (
+            <p className="text-sm text-muted-foreground">Loading today's counts…</p>
+          ) : headcount === null ? null : (
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Stat
+                label="Students"
+                value={String(headcount.enrolled)}
+                detail="Enrolled in the school"
+              />
+              <Stat
+                label="Present"
+                value={String(headcount.present)}
+                detail="Marked present today"
+              />
+              <Stat
+                label="Absent"
+                value={String(headcount.absent)}
+                detail="Marked absent today"
+              />
+            </div>
+          )}
+        </div>
+      ) : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">
             School pulse
           </h2>
           <p className="text-sm text-muted-foreground">
-            {data ? formatRange(data.from, data.to) : "Loading figures…"}
+            {tooLong
+              ? "Choose a range of 190 days or less."
+              : data
+                ? formatRange(data.from, data.to)
+                : "Loading figures…"}
           </p>
         </div>
-        <div className="flex w-fit rounded-lg bg-muted p-1">
-          {RANGES.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={cn(
-                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                preset === item.id
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-              onClick={() => setPreset(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <PeriodControl period={period} onChange={setPeriod} />
       </div>
 
-      {data === undefined ? (
+      {tooLong ? null : data === undefined ? (
         <p className="text-sm text-muted-foreground">Loading statistics…</p>
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Stat
-              label="Attendance"
-              value={
-                data.attendance.rate === null ? "—" : `${data.attendance.rate}%`
-              }
-              detail={
-                data.attendance.marked === 0
-                  ? "No attendance marked in this range"
-                  : `${data.attendance.present} present of ${data.attendance.marked} marks`
-              }
-            />
-            <Stat
-              label="Absent"
-              value={String(data.attendance.absent)}
-              detail={`${data.attendance.late} late in the same period`}
-            />
             {data.showFees ? (
               <Stat
                 label="Fee collection"
@@ -542,195 +828,14 @@ export function DashboardOverview() {
             )}
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-2">
-            <Card className="bg-card shadow-sm">
-              <CardHeader>
-                <CardTitle>
-                  {data.scope === "family"
-                    ? "Attendance by student"
-                    : "Attendance by class"}
-                </CardTitle>
-                <CardDescription>
-                  Present marks as a share of marks saved in this range. Unmarked
-                  students are left out.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {data.groups.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    {data.scope === "classes"
-                      ? "No classes are assigned to you."
-                      : "No enrolled students in this view."}
-                  </p>
-                ) : (
-                  data.groups.map((group, index) => (
-                    <div key={`${group.label}-${index}`} className="space-y-1">
-                      <div className="flex items-baseline justify-between gap-3 text-sm">
-                        <span className="font-medium">{group.label}</span>
-                        <span className="tabular-nums text-muted-foreground">
-                          {group.rate === null ? "No marks" : `${group.rate}%`}
-                        </span>
-                      </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-chart-1"
-                          style={{ width: `${group.rate ?? 0}%` }}
-                        />
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {group.present} present · {group.absent} absent · {group.late}{" "}
-                        late
-                      </p>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="bg-card shadow-sm">
-              <CardHeader>
-                <CardTitle>Attendance over time</CardTitle>
-                <CardDescription>
-                  {attendanceSeries
-                    ? `Showing ${attendanceSeries} marks${cadence(data.points.length)}. Total ${data.attendance[attendanceSeries]}.`
-                    : `Present, late, and absent marks${cadence(data.points.length)}.`}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <SeriesLegend
-                  label="Attendance series"
-                  items={ATTENDANCE_LEGEND}
-                  value={attendanceSeries}
-                  onChange={setAttendanceSeries}
-                />
-                <StackedColumns
-                  points={data.points}
-                  series={ATTENDANCE_STACK.filter(
-                    (item) =>
-                      !attendanceSeries || item.key === attendanceSeries,
-                  )}
-                  empty={
-                    attendanceSeries
-                      ? `No ${attendanceSeries} marks in this range.`
-                      : "No attendance marked in this range."
-                  }
-                />
-              </CardContent>
-            </Card>
-          </div>
-
           {data.showFees ? (
             <div className="grid gap-4 xl:grid-cols-5">
-              <Card className="bg-card shadow-sm xl:col-span-3">
-                <CardHeader>
-                  <CardTitle>Fee collection</CardTitle>
-                  <CardDescription>
-                    {feeSeries === "academic"
-                      ? `Showing academic fees${cadence(data.points.length)}. Total ${money(data.fees.academic)}.`
-                      : feeSeries === "discount"
-                        ? `Showing the academic discount${cadence(data.points.length)}. Total ${money(data.fees.academicDiscount)}.`
-                        : feeSeries === "transport"
-                          ? `Showing transport fees${cadence(data.points.length)}. Total ${money(data.fees.transport)}.`
-                          : `Academic and transport side by side${cadence(data.points.length)}. The grey cap is the academic discount.`}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <SeriesLegend
-                    label="Fee series"
-                    items={FEE_LEGEND}
-                    value={feeSeries}
-                    onChange={setFeeSeries}
-                  />
-                  <FeeColumns points={data.points} focus={feeSeries} />
-                </CardContent>
-              </Card>
-              <Card className="bg-card shadow-sm xl:col-span-2">
-                <CardHeader>
-                  <CardTitle>How fees were paid</CardTitle>
-                  <CardDescription>
-                    {paymentSeries === "cash"
-                      ? `Showing cash for ${rangeLabel.toLowerCase()}. Total ${money(data.fees.cash)}.`
-                      : paymentSeries === "online"
-                        ? `Showing online payments for ${rangeLabel.toLowerCase()}. Total ${money(data.fees.online)}.`
-                        : `Cash and online totals for ${rangeLabel.toLowerCase()}.`}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <SeriesLegend
-                    label="Payment modes"
-                    items={PAYMENT_LEGEND}
-                    value={paymentSeries}
-                    onChange={setPaymentSeries}
-                  />
-                  {[
-                    {
-                      id: "cash" as const,
-                      label: "Cash",
-                      amount: data.fees.cash,
-                      className: "bg-chart-2",
-                    },
-                    {
-                      id: "online" as const,
-                      label: "Online",
-                      amount: data.fees.online,
-                      className: "bg-chart-3",
-                    },
-                  ]
-                    .filter((row) => !paymentSeries || row.id === paymentSeries)
-                    .map((row) => {
-                    const width =
-                      data.fees.collected === 0
-                        ? 0
-                        : Math.round((row.amount / data.fees.collected) * 100);
-                    return (
-                      <div key={row.label} className="space-y-1">
-                        <div className="flex justify-between text-sm">
-                          <span>{row.label}</span>
-                          <span className="tabular-nums">{money(row.amount)}</span>
-                        </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className={cn("h-full rounded-full", row.className)}
-                            style={{ width: `${width}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {data.fees.collected -
-                    data.fees.cash -
-                    data.fees.online >
-                  0.009 ? (
-                    <p className="text-xs text-muted-foreground">
-                      Some receipts have no payment mode recorded.
-                    </p>
-                  ) : null}
-                </CardContent>
-              </Card>
+              <FeeCollectionChart data={data} />
+              <FeePaymentChart data={data} />
             </div>
           ) : null}
 
-          {data.showExpenses ? (
-            <Card className="bg-card shadow-sm">
-              <CardHeader>
-                <CardTitle>Expenses</CardTitle>
-                <CardDescription>
-                  {expenseSeries
-                    ? `Showing ${EXPENSE_BARS.find((item) => item.id === expenseSeries)?.label ?? "expenses"}${cadence(data.points.length)}. Total ${money(data.expenses[expenseSeries])}.`
-                    : `Fuel, staff payments, stock, and other expenses${cadence(data.points.length)}. Total ${money(data.expenses.total)}.`}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <SeriesLegend
-                  label="Expense series"
-                  items={EXPENSE_LEGEND}
-                  value={expenseSeries}
-                  onChange={setExpenseSeries}
-                />
-                <ExpenseColumns points={data.points} focus={expenseSeries} />
-              </CardContent>
-            </Card>
-          ) : null}
+          {data.showExpenses ? <ExpenseChart data={data} /> : null}
         </>
       )}
     </section>

@@ -5,6 +5,7 @@ import { useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { feeYearStartIso } from "@convex/lib/feeLedger";
+import { TintedName } from "@/components/tinted-name";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -266,7 +267,7 @@ export function FeeOverview({ asOf }: { asOf: string }) {
                     <tr key={row.paymentId} className="border-b last:border-0">
                       <td className="py-2 pr-3 whitespace-nowrap">{row.paidOn}</td>
                       <td className="py-2 pr-3">
-                        <span className="font-medium">{row.studentName}</span>
+                        <TintedName name={row.studentName} color={row.classColor} />
                         <span className="text-muted-foreground">
                           {" "}
                           {row.admissionNumber}
@@ -342,7 +343,7 @@ export function FeeOverview({ asOf }: { asOf: string }) {
                   {dues.rows.map((row) => (
                     <tr key={row.studentId} className="border-b last:border-0">
                       <td className="py-2 pr-3">
-                        <span className="font-medium">{row.studentName}</span>
+                        <TintedName name={row.studentName} color={row.classColor} />
                         <span className="text-muted-foreground">
                           {" "}
                           {row.admissionNumber}

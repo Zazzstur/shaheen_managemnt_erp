@@ -460,3 +460,63 @@ export const overview = query({
     };
   },
 });
+
+export const todayHeadcount = query({
+  args: { date: v.string() },
+  returns: v.union(
+    v.null(),
+    v.object({
+      enrolled: v.number(),
+      present: v.number(),
+      absent: v.number(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const user = await getCurrentUser(ctx);
+    if (user.role !== "super_admin") {
+      return null;
+    }
+    if (!isIsoDate(args.date)) {
+      throw new Error("Date must be YYYY-MM-DD");
+    }
+
+    const enrolledIds = new Set<Id<"students">>();
+    let cursor: string | null = null;
+    for (;;) {
+      const page = await ctx.db.query("students").paginate({
+        numItems: 200,
+        cursor,
+      });
+      for (const student of page.page) {
+        if (student.status === "enrolled") {
+          enrolledIds.add(student._id);
+        }
+      }
+      if (page.isDone) {
+        break;
+      }
+      cursor = page.continueCursor;
+    }
+
+    const marks = await ctx.db
+      .query("attendance")
+      .withIndex("by_date", (q) => q.eq("date", args.date))
+      .take(2000);
+    const seen = new Set<Id<"students">>();
+    let present = 0;
+    let absent = 0;
+    for (const mark of marks) {
+      if (!enrolledIds.has(mark.studentId) || seen.has(mark.studentId)) {
+        continue;
+      }
+      seen.add(mark.studentId);
+      if (mark.status === "present") {
+        present += 1;
+      } else if (mark.status === "absent") {
+        absent += 1;
+      }
+    }
+
+    return { enrolled: enrolledIds.size, present, absent };
+  },
+});

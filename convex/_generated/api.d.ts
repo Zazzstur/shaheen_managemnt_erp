@@ -23,6 +23,7 @@ import type * as fuel from "../fuel.js";
 import type * as homework from "../homework.js";
 import type * as http from "../http.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_classColors from "../lib/classColors.js";
 import type * as lib_classHistory from "../lib/classHistory.js";
 import type * as lib_dailyWork from "../lib/dailyWork.js";
 import type * as lib_feeLedger from "../lib/feeLedger.js";
@@ -66,6 +67,7 @@ declare const fullApi: ApiFromModules<{
   homework: typeof homework;
   http: typeof http;
   "lib/auth": typeof lib_auth;
+  "lib/classColors": typeof lib_classColors;
   "lib/classHistory": typeof lib_classHistory;
   "lib/dailyWork": typeof lib_dailyWork;
   "lib/feeLedger": typeof lib_feeLedger;

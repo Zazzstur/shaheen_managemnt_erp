@@ -4,7 +4,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useAuthActions, useConvexAuth } from "@convex-dev/auth/react";
 import { api } from "@convex/_generated/api";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowRightLeft,
@@ -51,7 +51,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
-import { canOpenNavItem } from "@/lib/access";
+import { canOpenNavItem, isOfficePath } from "@/lib/access";
 import { cn } from "@/lib/utils";
 
 const NAV_GROUPS = [
@@ -208,6 +208,12 @@ const STUDENT_LINKS = [
     label: "Student details",
     icon: IdCard,
     roles: ["super_admin", "teacher"],
+  },
+  {
+    href: "/students/attendance",
+    label: "Attendance",
+    icon: ClipboardCheck,
+    roles: ["super_admin"],
   },
   {
     href: "/students/class-change",
@@ -904,6 +910,25 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+function OfficeRouteGuard({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const user = useQuery(api.users.me);
+  const office = isOfficePath(pathname);
+  const blocked = office && user?.staffRole === "data_entry";
+
+  useEffect(() => {
+    if (blocked) {
+      router.replace("/dashboard");
+    }
+  }, [blocked, router]);
+
+  if (office && (user === undefined || blocked)) {
+    return <p className="text-sm text-muted-foreground">Loading…</p>;
+  }
+  return children;
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useConvexAuth();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -962,7 +987,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
         <main className="flex-1 p-4 md:p-8 print:p-0">
           <PageStar />
-          {children}
+          <OfficeRouteGuard>{children}</OfficeRouteGuard>
         </main>
       </div>
     </div>

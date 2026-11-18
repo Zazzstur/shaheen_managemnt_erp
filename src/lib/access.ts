@@ -12,8 +12,26 @@ export function canViewSchoolAdmin(user: {
   return isSchoolAdmin(user) || user.staffRole === "observer";
 }
 
+const OFFICE_PREFIXES = [
+  "/transport",
+  "/fuel",
+  "/admin/users",
+  "/admin/staff",
+  "/admin/fees",
+  "/stock",
+  "/expenses",
+  "/cash-flow",
+];
+
+export function isOfficePath(pathname: string) {
+  return OFFICE_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
 export function canOpenNavItem(
   item: {
+    href?: string;
     roles: readonly string[];
     staffRoles?: readonly string[];
     alsoStaffRoles?: readonly string[];
@@ -21,6 +39,13 @@ export function canOpenNavItem(
   role: string,
   staffRole?: string,
 ) {
+  if (
+    staffRole === "data_entry" &&
+    item.href !== undefined &&
+    isOfficePath(item.href)
+  ) {
+    return false;
+  }
   if (staffRole === "observer") {
     return item.roles.includes("super_admin");
   }

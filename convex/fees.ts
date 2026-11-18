@@ -271,6 +271,7 @@ const feeStatementValidator = v.object({
   // Admission form stores the father's name in guardianName.
   fatherName: v.optional(v.string()),
   classLabel: v.string(),
+  classColor: v.optional(v.string()),
   year: v.string(),
   academicEarlierPayments: v.number(),
   academic: feeAccountValidator,
@@ -304,6 +305,7 @@ const searchHitValidator = v.object({
   studentName: v.string(),
   admissionNumber: v.string(),
   classLabel: v.string(),
+  classColor: v.optional(v.string()),
 });
 
 function laterMonth(left: string, right: string) {
@@ -499,6 +501,7 @@ async function loadFeeStatement(
     admissionNumber: student.admissionNumber,
     ...(fatherName ? { fatherName } : {}),
     classLabel: `${classroom.name} ${classroom.section}`.trim(),
+    ...(classroom.color ? { classColor: classroom.color } : {}),
     year: feeYearLabel,
     academicEarlierPayments,
     academic,
@@ -560,26 +563,33 @@ export const searchStudents = query({
       return [];
     }
     const students = await enrolledStudentsForFeeSearch(ctx, undefined);
-    const classLabels = new Map<Id<"classes">, string>();
+    const classLabels = new Map<
+      Id<"classes">,
+      { label: string; color?: string }
+    >();
     const hits = [];
     for (const student of students) {
       if (!matchesFeeSearch(student, term)) {
         continue;
       }
-      let classLabel = classLabels.get(student.classId);
-      if (classLabel === undefined) {
+      let info = classLabels.get(student.classId);
+      if (info === undefined) {
         const classroom = await ctx.db.get("classes", student.classId);
-        classLabel = classroom
-          ? `${classroom.name} ${classroom.section}`.trim()
-          : "Unassigned";
-        classLabels.set(student.classId, classLabel);
+        info = {
+          label: classroom
+            ? `${classroom.name} ${classroom.section}`.trim()
+            : "Unassigned",
+          ...(classroom?.color ? { color: classroom.color } : {}),
+        };
+        classLabels.set(student.classId, info);
       }
       const name = studentName(student);
       hits.push({
         studentId: student._id,
         studentName: name,
         admissionNumber: student.admissionNumber,
-        classLabel,
+        classLabel: info.label,
+        ...(info.color ? { classColor: info.color } : {}),
       });
     }
     hits.sort((a, b) => a.studentName.localeCompare(b.studentName));
@@ -592,6 +602,7 @@ const filterHitValidator = v.object({
   studentName: v.string(),
   admissionNumber: v.string(),
   classLabel: v.string(),
+  classColor: v.optional(v.string()),
   totalDue: v.optional(v.number()),
 });
 
@@ -613,30 +624,38 @@ export const filterStudents = query({
       return [];
     }
     const students = await enrolledStudentsForFeeSearch(ctx, args.classId);
-    const classLabels = new Map<Id<"classes">, string | null>();
+    const classLabels = new Map<
+      Id<"classes">,
+      { label: string; color?: string } | null
+    >();
     const hits = [];
     for (const student of students) {
       const name = studentName(student);
       if (term && !matchesFeeSearch(student, term)) {
         continue;
       }
-      let classLabel = classLabels.get(student.classId);
-      if (classLabel === undefined) {
+      let info = classLabels.get(student.classId);
+      if (info === undefined) {
         const classroom = await ctx.db.get("classes", student.classId);
-        classLabel = classroom
-          ? `${classroom.name} ${classroom.section}`.trim()
+        info = classroom
+          ? {
+              label: `${classroom.name} ${classroom.section}`.trim(),
+              ...(classroom.color ? { color: classroom.color } : {}),
+            }
           : null;
-        classLabels.set(student.classId, classLabel);
+        classLabels.set(student.classId, info);
       }
-      if (classLabel === null) {
+      if (info === null) {
         continue;
       }
+      const colorFields = info.color ? { classColor: info.color } : {};
       if (args.feeStatus === "all") {
         hits.push({
           studentId: student._id,
           studentName: name,
           admissionNumber: student.admissionNumber,
-          classLabel,
+          classLabel: info.label,
+          ...colorFields,
         });
         continue;
       }
@@ -652,6 +671,7 @@ export const filterStudents = query({
         studentName: statement.studentName,
         admissionNumber: statement.admissionNumber,
         classLabel: statement.classLabel,
+        ...colorFields,
         totalDue,
       });
     }
@@ -1051,6 +1071,7 @@ const collectionRowValidator = v.object({
   studentName: v.string(),
   admissionNumber: v.string(),
   classLabel: v.string(),
+  classColor: v.optional(v.string()),
   kind: v.union(v.literal("academic"), v.literal("transport")),
   mode: v.optional(paymentModeValidator),
   amount: v.number(),
@@ -1092,6 +1113,7 @@ export const collectionReport = query({
           studentName: studentName(student),
           admissionNumber: student.admissionNumber,
           classLabel: `${classroom.name} ${classroom.section}`.trim(),
+          ...(classroom.color ? { classColor: classroom.color } : {}),
           kind: payment.kind,
           ...(payment.mode ? { mode: payment.mode } : {}),
           amount: payment.amount,
@@ -1114,6 +1136,7 @@ const dueRowValidator = v.object({
   studentName: v.string(),
   admissionNumber: v.string(),
   classLabel: v.string(),
+  classColor: v.optional(v.string()),
   fatherPhone: v.optional(v.string()),
   motherPhone: v.optional(v.string()),
   academicDue: v.number(),
@@ -1155,6 +1178,7 @@ export const dueReport = query({
         studentName: statement.studentName,
         admissionNumber: statement.admissionNumber,
         classLabel: statement.classLabel,
+        ...(statement.classColor ? { classColor: statement.classColor } : {}),
         ...(fatherPhone ? { fatherPhone } : {}),
         ...(motherPhone ? { motherPhone } : {}),
         academicDue,

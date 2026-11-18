@@ -52,6 +52,7 @@ export default defineSchema({
         }),
       ),
     ),
+    color: v.optional(v.string()),
   }).index("by_name_and_section", ["name", "section"]),
 
   subjects: defineTable({
@@ -328,13 +329,24 @@ export default defineSchema({
     price: v.optional(v.number()),
   }).index("by_name", ["nameKey"]),
 
+  stockPurchaseBatches: defineTable({
+    date: v.string(),
+    total: v.number(),
+    recordedBy: v.id("users"),
+    mode: v.optional(v.union(v.literal("cash"), v.literal("online"))),
+  }).index("by_date", ["date"]),
+
   stockPurchases: defineTable({
     itemId: v.id("stockItems"),
     date: v.string(),
     quantity: v.number(),
     total: v.number(),
     recordedBy: v.id("users"),
-  }).index("by_date", ["date"]),
+    batchId: v.optional(v.id("stockPurchaseBatches")),
+    mode: v.optional(v.union(v.literal("cash"), v.literal("online"))),
+  })
+    .index("by_date", ["date"])
+    .index("by_batch", ["batchId"]),
 
   stockHoldings: defineTable({
     userId: v.id("users"),

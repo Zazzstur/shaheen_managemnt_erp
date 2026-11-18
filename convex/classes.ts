@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { isClassColor } from "./lib/classColors";
 import { requireSchoolViewer, requireSuperAdmin } from "./lib/auth";
 import {
   classAdminRowValidator,
@@ -60,6 +61,7 @@ export const listWithStats = query({
         enrolledCount: students.filter((student) => student.status === "enrolled")
           .length,
         totalClassFee: totalClassFee(baseTuitionFee, extraFees),
+        ...(classroom.color ? { color: classroom.color } : {}),
       });
     }
     return rows;
@@ -131,6 +133,26 @@ export const update = mutation({
       baseTuitionFee: args.baseTuitionFee,
       extraFees: normalizeExtraFees(args.extraFees),
     });
+    return null;
+  },
+});
+
+export const setColor = mutation({
+  args: {
+    classId: v.id("classes"),
+    color: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx);
+    const classroom = await ctx.db.get("classes", args.classId);
+    if (!classroom) {
+      throw new Error("Class not found");
+    }
+    if (!isClassColor(args.color)) {
+      throw new Error("Choose a colour from the palette");
+    }
+    await ctx.db.patch("classes", args.classId, { color: args.color });
     return null;
   },
 });

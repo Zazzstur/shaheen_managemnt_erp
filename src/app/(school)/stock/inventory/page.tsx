@@ -19,14 +19,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-function money(value: number) {
-  return value.toLocaleString("en-IN", {
-    style: "currency",
-    currency: "INR",
-    minimumFractionDigits: 2,
-  });
-}
-
 function InventoryList() {
   const { admin } = useStockAccess();
   const rows = useQuery(api.stock.inventory, {});
@@ -37,8 +29,8 @@ function InventoryList() {
         <h1 className="text-2xl font-semibold tracking-tight">Inventory</h1>
         <p className="text-sm text-muted-foreground">
           {admin
-            ? "Quantity is what remains after stock given to an incharge. Lent is how many are still out on loan. Value is the worth of the quantity still in the office."
-            : "Quantity is what you still hold after giving stock to teachers. Lent is how many you still have out on loan. Value is the average price of one item times the quantity you still hold."}
+            ? "Quantity is what remains in the office. Lent is how many are still out on loan. Given is how many have been given to an incharge."
+            : "Quantity is what you still hold. Lent is how many you still have out on loan. Given is how many you have given to teachers."}
         </p>
       </div>
       <Card>
@@ -58,7 +50,7 @@ function InventoryList() {
                   <TableHead>Product</TableHead>
                   <TableHead>Quantity</TableHead>
                   <TableHead>Lent</TableHead>
-                  <TableHead>Value</TableHead>
+                  <TableHead>Given</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -67,11 +59,7 @@ function InventoryList() {
                     <TableCell className="font-medium">{row.name}</TableCell>
                     <TableCell>{row.quantity}</TableCell>
                     <TableCell>{row.lent ?? 0}</TableCell>
-                    <TableCell>
-                      {row.price === undefined
-                        ? "—"
-                        : money(Math.round(row.price * row.quantity * 100) / 100)}
-                    </TableCell>
+                    <TableCell>{row.given ?? 0}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

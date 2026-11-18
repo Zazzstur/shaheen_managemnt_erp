@@ -253,6 +253,7 @@ export const summary = query({
         description: itemName ? `Stock — ${itemName}` : "Stock",
         direction: "debit",
         amount: purchase.total,
+        mode: storedMode(purchase.mode),
         expense: "stock",
         created: purchase._creationTime,
       });

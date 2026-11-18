@@ -8,6 +8,7 @@ import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
+import { CLASS_COLORS } from "@convex/lib/classColors";
 import { feeYearLabel, feeYearStartYear } from "@convex/lib/feeLedger";
 import { classFormSchema, type ClassFormInput } from "@/lib/schemas";
 import { mutationResult } from "@/lib/result";
@@ -46,6 +47,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "cn";
 
 function blankClassForm(): ClassFormInput {
   const now = new Date();
@@ -64,12 +71,52 @@ function money(value: number) {
   return value.toFixed(2);
 }
 
+function ClassColorButton({
+  color,
+  onPick,
+}: {
+  color?: string;
+  onPick: (color: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        aria-label="Class colour"
+        className="size-6 shrink-0 rounded-md border border-foreground/20"
+        style={{ backgroundColor: color ?? "transparent" }}
+      />
+      <PopoverContent className="w-auto p-2">
+        <div className="grid grid-cols-8 gap-x-1 gap-y-1.5">
+          {CLASS_COLORS.map((swatch) => (
+            <button
+              key={swatch}
+              type="button"
+              aria-label={swatch}
+              className={cn(
+                "size-6 rounded-md",
+                color === swatch && "ring-2 ring-foreground ring-offset-1",
+              )}
+              style={{ backgroundColor: swatch }}
+              onClick={() => {
+                onPick(swatch);
+                setOpen(false);
+              }}
+            />
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export default function ClassesPage() {
   const me = useQuery(api.users.me);
   const classes = useQuery(api.classes.listWithStats);
   const createClass = useMutation(api.classes.create);
   const updateClass = useMutation(api.classes.update);
   const removeClass = useMutation(api.classes.remove);
+  const setColor = useMutation(api.classes.setColor);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<Id<"classes"> | null>(null);
 
@@ -201,7 +248,29 @@ export default function ClassesPage() {
                       {money(classroom.baseTuitionFee)}{" "}
                       <Badge variant="secondary">{classroom.tuitionCycle}</Badge>
                     </TableCell>
-                    <TableCell>{money(classroom.totalClassFee)}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {canEdit ? (
+                          <ClassColorButton
+                            color={classroom.color}
+                            onPick={(color) => {
+                              void setColor({
+                                classId: classroom._id,
+                                color,
+                              }).catch((error) => {
+                                toast.error(mutationResult(error).message);
+                              });
+                            }}
+                          />
+                        ) : classroom.color ? (
+                          <span
+                            className="size-6 shrink-0 rounded-md border border-foreground/20"
+                            style={{ backgroundColor: classroom.color }}
+                          />
+                        ) : null}
+                        {money(classroom.totalClassFee)}
+                      </div>
+                    </TableCell>
                     {canEdit ? (
                       <TableCell className="space-x-2 text-right">
                         <Button

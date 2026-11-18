@@ -285,7 +285,7 @@ function creditDaySeries(rows: CreditRow[]) {
 
 function CreditLegend() {
   return (
-    <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+    <ul className="grid h-10 grid-cols-2 content-start gap-x-2 text-xs leading-4 text-muted-foreground">
       {CREDIT_SOURCES.map((item) => (
         <li key={item.source} className="flex items-center gap-1.5">
           <span className={`size-2 rounded-sm ${item.swatch}`} aria-hidden />
@@ -408,40 +408,49 @@ function CreditMonthDetail({
           </div>
         </div>
       )}
-      <ul className="flex flex-wrap gap-x-3 gap-y-1">
-        {CREDIT_SOURCES.map((item) => {
-          const value =
-            item.source === "fee"
-              ? point.fees
-              : item.source === "transport"
-                ? point.transport
-                : point.funds;
-          return (
-            <li key={item.source} className="flex items-center gap-1.5 text-xs">
-              <span
-                className={`size-2 shrink-0 rounded-sm ${item.swatch}`}
-                aria-hidden
-              />
-              <span className="text-muted-foreground">{item.label}</span>
-              <span className={`font-medium tabular-nums ${item.amount}`}>
-                {money(value)}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
     </div>
+  );
+}
+
+function CreditBreakdown({
+  point,
+}: {
+  point: { fees: number; transport: number; funds: number };
+}) {
+  return (
+    <ul className="space-y-1">
+      {CREDIT_SOURCES.map((item) => {
+        const value =
+          item.source === "fee"
+            ? point.fees
+            : item.source === "transport"
+              ? point.transport
+              : point.funds;
+        return (
+          <li key={item.source} className="flex items-center gap-1.5 text-xs">
+            <span className={`size-2 shrink-0 rounded-sm ${item.swatch}`} aria-hidden />
+            <span className="text-muted-foreground">{item.label}</span>
+            <span className={`font-medium tabular-nums ${item.amount}`}>
+              {money(value)}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
 function CreditMonthChart({
   points,
   rows,
+  selectedMonth,
+  onSelectMonth,
 }: {
   points: CreditMonthPoint[];
   rows: CreditRow[];
+  selectedMonth: string | null;
+  onSelectMonth: (month: string | null) => void;
 }) {
-  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const backRef = useRef<HTMLButtonElement>(null);
   const barRefs = useRef(new Map<string, HTMLButtonElement>());
   const selected = points.find((point) => point.month === selectedMonth) ?? null;
@@ -453,11 +462,11 @@ function CreditMonthChart({
   }, [selectedMonth]);
 
   function showMonth(month: string) {
-    setSelectedMonth(month);
+    onSelectMonth(month);
   }
 
   function showChart(focusMonth?: string) {
-    setSelectedMonth(null);
+    onSelectMonth(null);
     if (focusMonth) {
       requestAnimationFrame(() => {
         barRefs.current.get(focusMonth)?.focus();
@@ -497,52 +506,6 @@ function CreditMonthChart({
           </p>
         </div>
         <CreditMonthDetail point={selected} rows={monthRows} />
-        {monthRows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No credits in this month.
-          </p>
-        ) : (
-          <div className="max-h-64 space-y-2.5 overflow-y-auto">
-            {CREDIT_SOURCES.map((group) => {
-              const items = monthRows.filter(
-                (row) => creditSourceOf(row) === group.source,
-              );
-              if (items.length === 0) {
-                return null;
-              }
-              return (
-                <section key={group.source} className="space-y-1.5">
-                  <h3 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                    <span
-                      className={`size-2 rounded-sm ${group.swatch}`}
-                      aria-hidden
-                    />
-                    {group.label}
-                  </h3>
-                  <ul className="space-y-1.5">
-                    {items.map((item) => (
-                      <li
-                        key={item.id}
-                        className="rounded-md border border-border px-2 py-1.5 text-sm"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="font-medium">{item.description}</span>
-                          <span className={`shrink-0 font-medium ${group.amount}`}>
-                            {money(item.amount)}
-                          </span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDay(item.date)} · Mode of payment:{" "}
-                          {modeLabel(item.mode)}
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              );
-            })}
-          </div>
-        )}
       </div>
     );
   }
@@ -557,17 +520,17 @@ function CreditMonthChart({
   const slot = 56;
   const barWidth = 22;
 
+  const spread = points.length <= 6;
+
   return (
-    <div className="space-y-2">
+    <div className="flex h-full flex-col gap-2">
       <CreditLegend />
-      <p className="text-xs text-muted-foreground">Credits by month</p>
-      <div className="overflow-x-auto">
+      <p className="text-xs leading-4 text-muted-foreground">Credits by month</p>
+      <div className="mt-auto overflow-x-auto">
         <div
-          className="px-1.5"
+          className={spread ? "w-full" : "px-1.5"}
           style={
-            points.length > 6
-              ? { minWidth: points.length * slot + 12 }
-              : undefined
+            spread ? undefined : { minWidth: points.length * slot + 12 }
           }
         >
           <div
@@ -585,8 +548,12 @@ function CreditMonthChart({
               return (
                 <div
                   key={point.month}
-                  className="flex h-full shrink-0 items-end justify-center"
-                  style={{ width: slot }}
+                  className={
+                    spread
+                      ? "flex h-full min-w-0 flex-1 items-end justify-center"
+                      : "flex h-full shrink-0 items-end justify-center"
+                  }
+                  style={spread ? undefined : { width: slot }}
                 >
                   {total > 0 ? (
                     <button
@@ -615,8 +582,12 @@ function CreditMonthChart({
             {points.map((point) => (
               <span
                 key={point.month}
-                className="shrink-0 pt-1 text-center text-[11px] leading-4 text-muted-foreground"
-                style={{ width: slot }}
+                className={
+                  spread
+                    ? "min-w-0 flex-1 pt-1 text-center text-[11px] leading-4 text-muted-foreground"
+                    : "shrink-0 pt-1 text-center text-[11px] leading-4 text-muted-foreground"
+                }
+                style={spread ? undefined : { width: slot }}
               >
                 {point.label}
               </span>
@@ -822,7 +793,7 @@ function debitDaySeries(rows: CreditRow[]) {
 
 function DebitLegend() {
   return (
-    <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+    <ul className="grid h-10 grid-cols-2 content-start gap-x-2 text-xs leading-4 text-muted-foreground">
       {EXPENSE_KINDS.map((item) => (
         <li key={item.kind} className="flex items-center gap-1.5">
           <span className={`size-2 rounded-sm ${item.swatch}`} aria-hidden />
@@ -948,32 +919,37 @@ function DebitMonthDetail({
           </div>
         </div>
       )}
-      <ul className="flex flex-wrap gap-x-3 gap-y-1">
-        {EXPENSE_KINDS.map((item) => (
-          <li key={item.kind} className="flex items-center gap-1.5 text-xs">
-            <span
-              className={`size-2 shrink-0 rounded-sm ${item.swatch}`}
-              aria-hidden
-            />
-            <span className="text-muted-foreground">{item.label}</span>
-            <span className={`font-medium tabular-nums ${item.amount}`}>
-              {money(debitPart(point, item.kind))}
-            </span>
-          </li>
-        ))}
-      </ul>
     </div>
+  );
+}
+
+function DebitBreakdown({ point }: { point: DebitParts }) {
+  return (
+    <ul className="space-y-1">
+      {EXPENSE_KINDS.map((item) => (
+        <li key={item.kind} className="flex items-center gap-1.5 text-xs">
+          <span className={`size-2 shrink-0 rounded-sm ${item.swatch}`} aria-hidden />
+          <span className="text-muted-foreground">{item.label}</span>
+          <span className={`font-medium tabular-nums ${item.amount}`}>
+            {money(debitPart(point, item.kind))}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
 function DebitMonthChart({
   points,
   rows,
+  selectedMonth,
+  onSelectMonth,
 }: {
   points: DebitMonthPoint[];
   rows: CreditRow[];
+  selectedMonth: string | null;
+  onSelectMonth: (month: string | null) => void;
 }) {
-  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const backRef = useRef<HTMLButtonElement>(null);
   const barRefs = useRef(new Map<string, HTMLButtonElement>());
   const selected = points.find((point) => point.month === selectedMonth) ?? null;
@@ -985,11 +961,11 @@ function DebitMonthChart({
   }, [selectedMonth]);
 
   function showMonth(month: string) {
-    setSelectedMonth(month);
+    onSelectMonth(month);
   }
 
   function showChart(focusMonth?: string) {
-    setSelectedMonth(null);
+    onSelectMonth(null);
     if (focusMonth) {
       requestAnimationFrame(() => {
         barRefs.current.get(focusMonth)?.focus();
@@ -1029,54 +1005,6 @@ function DebitMonthChart({
           </p>
         </div>
         <DebitMonthDetail point={selected} rows={monthRows} />
-        {monthRows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No debits in this month.
-          </p>
-        ) : (
-          <div className="max-h-64 space-y-2.5 overflow-y-auto">
-            {EXPENSE_KINDS.map((group) => {
-              const items = monthRows.filter(
-                (row) => expenseKindOf(row) === group.kind,
-              );
-              if (items.length === 0) {
-                return null;
-              }
-              return (
-                <section key={group.kind} className="space-y-1.5">
-                  <h3 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                    <span
-                      className={`size-2 rounded-sm ${group.swatch}`}
-                      aria-hidden
-                    />
-                    {group.label}
-                  </h3>
-                  <ul className="space-y-1.5">
-                    {items.map((item) => (
-                      <li
-                        key={item.id}
-                        className="rounded-md border border-border px-2 py-1.5 text-sm"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="font-medium">{item.description}</span>
-                          <span className={`shrink-0 font-medium ${group.amount}`}>
-                            {money(item.amount)}
-                          </span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDay(item.date)}
-                          {item.mode
-                            ? ` · Mode of payment: ${modeLabel(item.mode)}`
-                            : ""}
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              );
-            })}
-          </div>
-        )}
       </div>
     );
   }
@@ -1091,17 +1019,17 @@ function DebitMonthChart({
   const slot = 56;
   const barWidth = 22;
 
+  const spread = points.length <= 6;
+
   return (
-    <div className="space-y-2">
+    <div className="flex h-full flex-col gap-2">
       <DebitLegend />
-      <p className="text-xs text-muted-foreground">Debits by month</p>
-      <div className="overflow-x-auto">
+      <p className="text-xs leading-4 text-muted-foreground">Debits by month</p>
+      <div className="mt-auto overflow-x-auto">
         <div
-          className="px-1.5"
+          className={spread ? "w-full" : "px-1.5"}
           style={
-            points.length > 6
-              ? { minWidth: points.length * slot + 12 }
-              : undefined
+            spread ? undefined : { minWidth: points.length * slot + 12 }
           }
         >
           <div
@@ -1119,8 +1047,12 @@ function DebitMonthChart({
               return (
                 <div
                   key={point.month}
-                  className="flex h-full shrink-0 items-end justify-center"
-                  style={{ width: slot }}
+                  className={
+                    spread
+                      ? "flex h-full min-w-0 flex-1 items-end justify-center"
+                      : "flex h-full shrink-0 items-end justify-center"
+                  }
+                  style={spread ? undefined : { width: slot }}
                 >
                   {total > 0 ? (
                     <button
@@ -1149,8 +1081,12 @@ function DebitMonthChart({
             {points.map((point) => (
               <span
                 key={point.month}
-                className="shrink-0 pt-1 text-center text-[11px] leading-4 text-muted-foreground"
-                style={{ width: slot }}
+                className={
+                  spread
+                    ? "min-w-0 flex-1 pt-1 text-center text-[11px] leading-4 text-muted-foreground"
+                    : "shrink-0 pt-1 text-center text-[11px] leading-4 text-muted-foreground"
+                }
+                style={spread ? undefined : { width: slot }}
               >
                 {point.label}
               </span>
@@ -1195,89 +1131,77 @@ function CashMonthChart({
     }
   }
 
-  const chartHeight = 156;
-  const padTop = 12;
-  const padBottom = 26;
-  const gutter = min < 0 ? 18 : 8;
-  const slot = 52;
+  const plotHeight = 120;
+  const slot = 56;
   const barWidth = 22;
-  const chartWidth = points.length * slot + gutter * 2;
-  const plotHeight = chartHeight - padTop - padBottom;
-  const span = max - min || 1;
-  const yAt = (value: number) => padTop + ((max - value) / span) * plotHeight;
-  const zeroY = yAt(0);
+  const scale = Math.max(Math.abs(max), Math.abs(min), 1);
+  const spread = points.length <= 6;
 
   return (
-    <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">{caption}</p>
-      <div className="overflow-x-auto">
-        <svg
-          role="img"
-          aria-label={caption}
-          viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-          className="h-40 w-full"
-          style={points.length > 6 ? { minWidth: chartWidth } : undefined}
+    <div className="flex h-full flex-col gap-2">
+      <div className="h-10" aria-hidden />
+      <p className="text-xs leading-4 text-muted-foreground">{caption}</p>
+      <div className="mt-auto overflow-x-auto">
+        <div
+          className={spread ? "w-full" : undefined}
+          style={spread ? undefined : { minWidth: points.length * slot }}
         >
-          <line
-            x1={gutter}
-            x2={chartWidth - gutter}
-            y1={zeroY}
-            y2={zeroY}
-            stroke="currentColor"
-            strokeWidth={1}
-            strokeDasharray={min < 0 ? "3 3" : undefined}
-            className="text-foreground/25"
-          />
-          {min < 0 ? (
-            <text
-              x={2}
-              y={zeroY < 18 ? zeroY + 11 : zeroY - 4}
-              fontSize="10"
-              fill="currentColor"
-              className="text-muted-foreground"
-            >
-              0
-            </text>
-          ) : null}
-          {points.map((point, index) => {
-            const value = values[index] ?? 0;
-            const x = gutter + index * slot + (slot - barWidth) / 2;
-            const top = yAt(Math.max(value, 0));
-            const bottom = yAt(Math.min(value, 0));
-            const height = value === 0 ? 0 : Math.max(bottom - top, 2);
-            const negative =
-              tone === "debit" || (tone === "balance" && value < 0);
-            return (
-              <g key={point.month}>
-                <title>{`${point.month}: ${money(value)}`}</title>
-                {height > 0 ? (
-                  <rect
-                    x={x}
-                    y={top}
-                    width={barWidth}
-                    height={height}
-                    rx={3}
-                    className={
-                      negative
-                        ? "fill-red-600 dark:fill-red-400"
-                        : "fill-green-600 dark:fill-green-400"
-                    }
-                  />
-                ) : null}
-                <text
-                  x={gutter + index * slot + slot / 2}
-                  y={chartHeight - 8}
-                  textAnchor="middle"
-                  fontSize="10"
-                  fill="currentColor"
-                  className="text-muted-foreground"
+          <div
+            role="group"
+            aria-label={caption}
+            className="flex items-end border-b border-foreground/20"
+            style={{ height: plotHeight }}
+          >
+            {points.map((point, index) => {
+              const value = values[index] ?? 0;
+              const negative = tone === "debit" || (tone === "balance" && value < 0);
+              const height =
+                value === 0
+                  ? 0
+                  : Math.max((Math.abs(value) / scale) * (plotHeight - 8), 4);
+              return (
+                <div
+                  key={point.month}
+                  className={
+                    spread
+                      ? "flex h-full min-w-0 flex-1 items-end justify-center"
+                      : "flex h-full shrink-0 items-end justify-center"
+                  }
+                  style={spread ? undefined : { width: slot }}
                 >
-                  {point.label}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
+                  {height > 0 ? (
+                    <div
+                      role="img"
+                      title={`${point.label}: ${money(value)}`}
+                      aria-label={`${point.label}: ${money(value)}`}
+                      className={
+                        negative
+                          ? "rounded-t-[3px] bg-red-600 dark:bg-red-400"
+                          : "rounded-t-[3px] bg-green-600 dark:bg-green-400"
+                      }
+                      style={{ height, width: barWidth }}
+                    />
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex">
+            {points.map((point) => (
+              <span
+                key={point.month}
+                className={
+                  spread
+                    ? "min-w-0 flex-1 pt-1 text-center text-[11px] leading-4 text-muted-foreground"
+                    : "shrink-0 pt-1 text-center text-[11px] leading-4 text-muted-foreground"
+                }
+                style={spread ? undefined : { width: slot }}
+              >
+                {point.label}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1317,6 +1241,8 @@ export default function CashFlowPage() {
   const canEdit = me ? isSchoolAdmin(me) : false;
   const summary = useQuery(api.cashFlow.summary, allowed ? {} : "skip");
   const addFund = useMutation(api.cashFlow.addFund);
+  const [creditMonth, setCreditMonth] = useState<string | null>(null);
+  const [debitMonth, setDebitMonth] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(todayInIndia);
@@ -1392,6 +1318,33 @@ export default function CashFlowPage() {
   const months = monthSeries(summary.movements);
   const creditMonths = creditMonthSeries(summary.movements);
   const debitMonths = debitMonthSeries(summary.movements);
+  const selectedCredit = creditMonths.find((point) => point.month === creditMonth);
+  const selectedDebit = debitMonths.find((point) => point.month === debitMonth);
+  const creditLabel = selectedCredit?.label;
+  const debitLabel = selectedDebit?.label;
+  const movements = summary.movements.filter((movement) => {
+    if (!creditMonth && !debitMonth) {
+      return true;
+    }
+    const month = movement.date.slice(0, 7);
+    if (creditMonth && movement.direction === "credit" && month === creditMonth) {
+      return true;
+    }
+    if (debitMonth && movement.direction === "debit" && month === debitMonth) {
+      return true;
+    }
+    return false;
+  });
+  const movementNote =
+    creditLabel && debitLabel
+      ? creditMonth === debitMonth
+        ? `Movements in ${creditLabel}.`
+        : `Credits in ${creditLabel} and debits in ${debitLabel}.`
+      : creditLabel
+        ? `Credits in ${creditLabel}.`
+        : debitLabel
+          ? `Debits in ${debitLabel}.`
+          : "Newest first.";
 
   return (
     <div className="space-y-6">
@@ -1414,30 +1367,50 @@ export default function CashFlowPage() {
         )}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
+      <div className="grid items-stretch gap-4 sm:grid-cols-3">
+        <Card className="h-full">
           <CardHeader>
-            <CardDescription>Total credited</CardDescription>
-            <CardTitle className="text-green-700 dark:text-green-400">
-              {money(summary.credited)}
-            </CardTitle>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardDescription>Total credited</CardDescription>
+                <CardTitle className="text-green-700 dark:text-green-400">
+                  {money(summary.credited)}
+                </CardTitle>
+              </div>
+              {selectedCredit ? <CreditBreakdown point={selectedCredit} /> : null}
+            </div>
           </CardHeader>
-          <CardContent>
-            <CreditMonthChart points={creditMonths} rows={summary.movements} />
+          <CardContent className="flex-1">
+            <CreditMonthChart
+              points={creditMonths}
+              rows={summary.movements}
+              selectedMonth={creditMonth}
+              onSelectMonth={setCreditMonth}
+            />
           </CardContent>
         </Card>
-        <Card>
+        <Card className="h-full">
           <CardHeader>
-            <CardDescription>Total debited</CardDescription>
-            <CardTitle className="text-red-700 dark:text-red-400">
-              {money(summary.debited)}
-            </CardTitle>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardDescription>Total debited</CardDescription>
+                <CardTitle className="text-red-700 dark:text-red-400">
+                  {money(summary.debited)}
+                </CardTitle>
+              </div>
+              {selectedDebit ? <DebitBreakdown point={selectedDebit} /> : null}
+            </div>
           </CardHeader>
-          <CardContent>
-            <DebitMonthChart points={debitMonths} rows={summary.movements} />
+          <CardContent className="flex-1">
+            <DebitMonthChart
+              points={debitMonths}
+              rows={summary.movements}
+              selectedMonth={debitMonth}
+              onSelectMonth={setDebitMonth}
+            />
           </CardContent>
         </Card>
-        <Card>
+        <Card className="h-full">
           <CardHeader>
             <CardDescription>Balance</CardDescription>
             <CardTitle
@@ -1452,7 +1425,7 @@ export default function CashFlowPage() {
               {money(summary.balance)}
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex-1">
             <CashMonthChart
               caption="Running balance by month"
               points={months}
@@ -1466,12 +1439,14 @@ export default function CashFlowPage() {
       <Card>
         <CardHeader>
           <CardTitle>Movements</CardTitle>
-          <CardDescription>Newest first.</CardDescription>
+          <CardDescription>{movementNote}</CardDescription>
         </CardHeader>
         <CardContent>
-          {summary.movements.length === 0 ? (
+          {movements.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No money movements yet.
+              {creditMonth || debitMonth
+                ? "No movements in the selected month."
+                : "No money movements yet."}
             </p>
           ) : (
             <Table>
@@ -1484,7 +1459,7 @@ export default function CashFlowPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {summary.movements.map((movement) => (
+                {movements.map((movement) => (
                   <TableRow key={movement.id}>
                     <TableCell>{formatDay(movement.date)}</TableCell>
                     <TableCell className="font-medium">

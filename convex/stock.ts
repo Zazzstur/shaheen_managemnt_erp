@@ -90,6 +90,82 @@ function todayInIndia() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 }
 
+const MAX_STOCK_LINES = 30;
+
+async function addStockLine(
+  ctx: MutationCtx,
+  recordedBy: Id<"users">,
+  args: { name: string; quantity: number; price: number },
+  batchId: Id<"stockPurchaseBatches">,
+  mode: "cash" | "online",
+) {
+  const name = args.name.trim().replace(/\s+/g, " ");
+  const key = nameKey(name);
+  if (!key || name.length > 80) {
+    throw new ConvexError("Enter a product name");
+  }
+  assertQuantity(args.quantity);
+  assertPrice(args.price);
+  const unitPrice = unitFromTotal(args.price, args.quantity);
+  const existing = await ctx.db
+    .query("stockItems")
+    .withIndex("by_name", (q) => q.eq("nameKey", key))
+    .unique();
+  if (existing) {
+    const next = existing.quantity + args.quantity;
+    if (next > MAX_QUANTITY) {
+      throw new ConvexError("That would put this item over the quantity limit");
+    }
+    await ctx.db.patch("stockItems", existing._id, {
+      quantity: next,
+      price: blendedUnit(
+        existing.quantity,
+        existing.price,
+        args.quantity,
+        args.price,
+      ),
+    });
+    await recordPurchase(ctx, {
+      itemId: existing._id,
+      quantity: args.quantity,
+      total: args.price,
+      recordedBy,
+      batchId,
+      mode,
+    });
+    return {
+      name: existing.name,
+      quantity: args.quantity,
+      total: args.price,
+      unitPrice,
+      stockQuantity: next,
+      created: false,
+    };
+  }
+  const itemId = await ctx.db.insert("stockItems", {
+    name,
+    nameKey: key,
+    quantity: args.quantity,
+    price: unitPrice,
+  });
+  await recordPurchase(ctx, {
+    itemId,
+    quantity: args.quantity,
+    total: args.price,
+    recordedBy,
+    batchId,
+    mode,
+  });
+  return {
+    name,
+    quantity: args.quantity,
+    total: args.price,
+    unitPrice,
+    stockQuantity: args.quantity,
+    created: true,
+  };
+}
+
 async function recordPurchase(
   ctx: MutationCtx,
   purchase: {
@@ -97,14 +173,31 @@ async function recordPurchase(
     quantity: number;
     total: number;
     recordedBy: Id<"users">;
+    batchId: Id<"stockPurchaseBatches">;
+    mode: "cash" | "online";
   },
 ) {
   await ctx.db.insert("stockPurchases", {
     itemId: purchase.itemId,
+    batchId: purchase.batchId,
     date: todayInIndia(),
     quantity: purchase.quantity,
     total: purchase.total,
+    mode: purchase.mode,
     recordedBy: purchase.recordedBy,
+  });
+}
+
+async function openPurchaseBatch(
+  ctx: MutationCtx,
+  recordedBy: Id<"users">,
+  mode: "cash" | "online",
+) {
+  return await ctx.db.insert("stockPurchaseBatches", {
+    date: todayInIndia(),
+    total: 0,
+    mode,
+    recordedBy,
   });
 }
 
@@ -137,6 +230,7 @@ const itemValidator = v.object({
   quantity: v.number(),
   price: v.optional(v.number()),
   lent: v.optional(v.number()),
+  given: v.optional(v.number()),
 });
 
 const personValidator = v.object({
@@ -156,8 +250,9 @@ const issueValidator = v.object({
   canReturn: v.boolean(),
 });
 
-async function lentByItem(
+async function issuedByItem(
   ctx: QueryCtx,
+  mode: "give" | "lend",
   fromUserId: Id<"users"> | undefined,
 ) {
   const issues = fromUserId
@@ -167,11 +262,11 @@ async function lentByItem(
         .take(400)
     : await ctx.db
         .query("stockIssues")
-        .withIndex("by_mode", (q) => q.eq("mode", "lend"))
+        .withIndex("by_mode", (q) => q.eq("mode", mode))
         .take(400);
   const counts = new Map<Id<"stockItems">, number>();
   for (const issue of issues) {
-    if (issue.mode !== "lend") {
+    if (issue.mode !== mode) {
       continue;
     }
     if (!fromUserId) {
@@ -180,11 +275,12 @@ async function lentByItem(
         continue;
       }
     }
-    const outstanding = issue.quantity - issue.returnedQuantity;
-    if (outstanding <= 0) {
+    const amount =
+      mode === "lend" ? issue.quantity - issue.returnedQuantity : issue.quantity;
+    if (amount <= 0) {
       continue;
     }
-    counts.set(issue.itemId, (counts.get(issue.itemId) ?? 0) + outstanding);
+    counts.set(issue.itemId, (counts.get(issue.itemId) ?? 0) + amount);
   }
   return counts;
 }
@@ -195,7 +291,11 @@ export const inventory = query({
   handler: async (ctx) => {
     const user = await requireStockViewer(ctx);
     const viewAll = canViewSchoolAdmin(user);
-    const lent = await lentByItem(ctx, viewAll ? undefined : user._id);
+    const scope = viewAll ? undefined : user._id;
+    const [lent, given] = await Promise.all([
+      issuedByItem(ctx, "lend", scope),
+      issuedByItem(ctx, "give", scope),
+    ]);
     if (viewAll) {
       const items = await ctx.db.query("stockItems").take(300);
       return items
@@ -204,6 +304,7 @@ export const inventory = query({
           name: item.name,
           quantity: item.quantity,
           lent: lent.get(item._id) ?? 0,
+          given: given.get(item._id) ?? 0,
           ...(item.price !== undefined ? { price: item.price } : {}),
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
@@ -217,7 +318,8 @@ export const inventory = query({
     for (const holding of holdings) {
       seen.add(holding.itemId);
       const outstanding = lent.get(holding.itemId) ?? 0;
-      if (holding.quantity <= 0 && outstanding <= 0) {
+      const givenCount = given.get(holding.itemId) ?? 0;
+      if (holding.quantity <= 0 && outstanding <= 0 && givenCount <= 0) {
         continue;
       }
       const item = await ctx.db.get("stockItems", holding.itemId);
@@ -229,11 +331,23 @@ export const inventory = query({
         name: item.name,
         quantity: holding.quantity,
         lent: outstanding,
+        given: givenCount,
         ...(item.price !== undefined ? { price: item.price } : {}),
       });
     }
+    const extras = new Map<Id<"stockItems">, { lent: number; given: number }>();
     for (const [itemId, outstanding] of lent) {
-      if (seen.has(itemId) || outstanding <= 0) {
+      const current = extras.get(itemId) ?? { lent: 0, given: 0 };
+      current.lent = outstanding;
+      extras.set(itemId, current);
+    }
+    for (const [itemId, givenCount] of given) {
+      const current = extras.get(itemId) ?? { lent: 0, given: 0 };
+      current.given = givenCount;
+      extras.set(itemId, current);
+    }
+    for (const [itemId, counts] of extras) {
+      if (seen.has(itemId) || (counts.lent <= 0 && counts.given <= 0)) {
         continue;
       }
       const item = await ctx.db.get("stockItems", itemId);
@@ -244,7 +358,8 @@ export const inventory = query({
         itemId: item._id,
         name: item.name,
         quantity: 0,
-        lent: outstanding,
+        lent: counts.lent,
+        given: counts.given,
         ...(item.price !== undefined ? { price: item.price } : {}),
       });
     }
@@ -356,64 +471,168 @@ export const searchItems = query({
   },
 });
 
+const paymentModeValidator = v.union(v.literal("cash"), v.literal("online"));
+
+const stockLineValidator = v.object({
+  name: v.string(),
+  quantity: v.number(),
+  price: v.number(),
+});
+
+const purchaseLineValidator = v.object({
+  name: v.string(),
+  quantity: v.number(),
+  total: v.number(),
+  unitPrice: v.number(),
+});
+
+async function requireStockAdmin(ctx: QueryCtx | MutationCtx) {
+  const user = await getCurrentUser(ctx);
+  if (!isSchoolAdmin(user)) {
+    throw new Error("Unauthorized: insufficient role");
+  }
+  return user;
+}
+
+function displayUnit(total: number, quantity: number) {
+  if (quantity <= 0) {
+    return 0;
+  }
+  return Math.round((total / quantity) * 100) / 100;
+}
+
+export const purchaseHistory = query({
+  args: {},
+  returns: v.array(
+    v.object({
+      purchaseId: v.string(),
+      date: v.string(),
+      total: v.number(),
+      mode: v.optional(paymentModeValidator),
+      lines: v.array(purchaseLineValidator),
+    }),
+  ),
+  handler: async (ctx) => {
+    await requireStockAdmin(ctx);
+    const names = new Map<Id<"stockItems">, string>();
+    async function productName(itemId: Id<"stockItems">) {
+      const cached = names.get(itemId);
+      if (cached !== undefined) {
+        return cached;
+      }
+      const item = await ctx.db.get("stockItems", itemId);
+      const name = item?.name ?? "Removed product";
+      names.set(itemId, name);
+      return name;
+    }
+    async function lineFor(purchase: Doc<"stockPurchases">) {
+      return {
+        name: await productName(purchase.itemId),
+        quantity: purchase.quantity,
+        total: purchase.total,
+        unitPrice: displayUnit(purchase.total, purchase.quantity),
+      };
+    }
+
+    const batches = await ctx.db
+      .query("stockPurchaseBatches")
+      .order("desc")
+      .take(80);
+    const history: {
+      purchaseId: string;
+      date: string;
+      total: number;
+      mode?: "cash" | "online";
+      created: number;
+      lines: {
+        name: string;
+        quantity: number;
+        total: number;
+        unitPrice: number;
+      }[];
+    }[] = [];
+    for (const batch of batches) {
+      const purchases = await ctx.db
+        .query("stockPurchases")
+        .withIndex("by_batch", (q) => q.eq("batchId", batch._id))
+        .take(40);
+      purchases.sort((a, b) => a._creationTime - b._creationTime);
+      const lines = [];
+      for (const purchase of purchases) {
+        lines.push(await lineFor(purchase));
+      }
+      history.push({
+        purchaseId: batch._id,
+        date: batch.date,
+        total: batch.total,
+        created: batch._creationTime,
+        lines,
+        ...(batch.mode === "cash" || batch.mode === "online"
+          ? { mode: batch.mode }
+          : {}),
+      });
+    }
+
+    const purchases = await ctx.db.query("stockPurchases").order("desc").take(200);
+    for (const purchase of purchases) {
+      if (purchase.batchId !== undefined) {
+        continue;
+      }
+      history.push({
+        purchaseId: purchase._id,
+        date: purchase.date,
+        total: purchase.total,
+        created: purchase._creationTime,
+        lines: [await lineFor(purchase)],
+        ...(purchase.mode === "cash" || purchase.mode === "online"
+          ? { mode: purchase.mode }
+          : {}),
+      });
+    }
+
+    history.sort((a, b) => b.created - a.created);
+    return history.slice(0, 80).map(({ created: _created, ...purchase }) => purchase);
+  },
+});
+
 export const addItem = mutation({
   args: {
     name: v.string(),
     quantity: v.number(),
     price: v.number(),
+    mode: paymentModeValidator,
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const user = await getCurrentUser(ctx);
-    if (!isSchoolAdmin(user)) {
-      throw new Error("Unauthorized: insufficient role");
-    }
-    const name = args.name.trim().replace(/\s+/g, " ");
-    const key = nameKey(name);
-    if (!key || name.length > 80) {
-      throw new ConvexError("Enter a product name");
-    }
-    assertQuantity(args.quantity);
-    assertPrice(args.price);
-    const existing = await ctx.db
-      .query("stockItems")
-      .withIndex("by_name", (q) => q.eq("nameKey", key))
-      .unique();
-    if (existing) {
-      const next = existing.quantity + args.quantity;
-      if (next > MAX_QUANTITY) {
-        throw new ConvexError("That would put this item over the quantity limit");
-      }
-      await ctx.db.patch("stockItems", existing._id, {
-        quantity: next,
-        price: blendedUnit(
-          existing.quantity,
-          existing.price,
-          args.quantity,
-          args.price,
-        ),
-      });
-      await recordPurchase(ctx, {
-        itemId: existing._id,
-        quantity: args.quantity,
-        total: args.price,
-        recordedBy: user._id,
-      });
-      return null;
-    }
-    const itemId = await ctx.db.insert("stockItems", {
-      name,
-      nameKey: key,
-      quantity: args.quantity,
-      price: unitFromTotal(args.price, args.quantity),
-    });
-    await recordPurchase(ctx, {
-      itemId,
-      quantity: args.quantity,
-      total: args.price,
-      recordedBy: user._id,
-    });
+    const user = await requireStockAdmin(ctx);
+    const batchId = await openPurchaseBatch(ctx, user._id, args.mode);
+    const line = await addStockLine(ctx, user._id, args, batchId, args.mode);
+    await ctx.db.patch("stockPurchaseBatches", batchId, { total: line.total });
     return null;
+  },
+});
+
+export const addItems = mutation({
+  args: {
+    items: v.array(stockLineValidator),
+    mode: paymentModeValidator,
+  },
+  returns: v.id("stockPurchaseBatches"),
+  handler: async (ctx, args) => {
+    const user = await requireStockAdmin(ctx);
+    if (args.items.length < 1 || args.items.length > MAX_STOCK_LINES) {
+      throw new ConvexError("Add between 1 and 30 products");
+    }
+    const batchId = await openPurchaseBatch(ctx, user._id, args.mode);
+    let totalPrice = 0;
+    for (const item of args.items) {
+      const line = await addStockLine(ctx, user._id, item, batchId, args.mode);
+      totalPrice += line.total;
+    }
+    await ctx.db.patch("stockPurchaseBatches", batchId, {
+      total: Math.round(totalPrice * 100) / 100,
+    });
+    return batchId;
   },
 });
 

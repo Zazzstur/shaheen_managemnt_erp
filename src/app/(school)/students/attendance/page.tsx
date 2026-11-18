@@ -99,13 +99,13 @@ export default function StudentAttendancePage() {
   const canEdit = me ? isSchoolAdmin(me) : false;
   const classes = useQuery(api.catalog.listClasses, canView ? {} : "skip");
   const [date, setDate] = useState(todayIso);
-  const [classId, setClassId] = useState<Id<"classes"> | "">("");
+  const [classId, setClassId] = useState("");
   const [editing, setEditing] = useState(false);
   const [marks, setMarks] = useState<Record<string, AttendanceStatus>>({});
   const [saving, setSaving] = useState(false);
   const sheet = useQuery(
     api.attendance.forClassDate,
-    classId ? { classId, date } : "skip",
+    classId ? { classId: classId as Id<"classes">, date } : "skip",
   );
   const markForOffice = useMutation(api.attendance.markForOffice);
 
@@ -148,7 +148,7 @@ export default function StudentAttendancePage() {
     setSaving(true);
     try {
       const result = await markForOffice({
-        classId,
+        classId: classId as Id<"classes">,
         date,
         records: sheet.students.map((student) => ({
           studentId: student.studentId,
@@ -244,14 +244,14 @@ export default function StudentAttendancePage() {
               ) : sortedClasses.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No classes yet.</p>
               ) : (
-                <Select
+                <Select<string>
                   value={classId}
                   items={classItems}
                   onValueChange={(value) => {
                     if (!value) {
                       return;
                     }
-                    setClassId(value as Id<"classes">);
+                    setClassId(value);
                     setMarks({});
                     setEditing(false);
                   }}

@@ -481,21 +481,11 @@ export const todayHeadcount = query({
     }
 
     const enrolledIds = new Set<Id<"students">>();
-    let cursor: string | null = null;
-    for (;;) {
-      const page = await ctx.db.query("students").paginate({
-        numItems: 200,
-        cursor,
-      });
-      for (const student of page.page) {
-        if (student.status === "enrolled") {
-          enrolledIds.add(student._id);
-        }
+    const students = await ctx.db.query("students").take(8000);
+    for (const student of students) {
+      if (student.status === "enrolled") {
+        enrolledIds.add(student._id);
       }
-      if (page.isDone) {
-        break;
-      }
-      cursor = page.continueCursor;
     }
 
     const marks = await ctx.db
